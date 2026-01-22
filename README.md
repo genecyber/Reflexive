@@ -278,6 +278,68 @@ const r = makeReflexive({ transport: 'websocket' });
 // Events propagate across processes
 ```
 
+### Python Support
+
+Native Python implementation using the Python Claude Agent SDK:
+
+```python
+# TODO: Not yet implemented
+from reflexive import make_reflexive
+
+r = make_reflexive(port=3099, title="My Python App")
+
+# Console capture
+print("Server started")  # Captured automatically
+
+# Custom state
+r.set_state("active_users", 42)
+
+# CLI mode
+# $ reflexive ./app.py
+```
+
+### Other Language Support (Shims)
+
+Since the Claude Agent SDK only has native implementations for **Node.js** and **Python**, other languages need a shim/bridge approach:
+
+```
+┌─────────────┐     HTTP/IPC      ┌──────────────────┐
+│  Your App   │ ←───────────────→ │  Reflexive Node  │
+│  (Go/Rust/  │   logs, state,    │  or Python host  │
+│   Ruby/etc) │   commands        │                  │
+└─────────────┘                   └──────────────────┘
+```
+
+**Planned shim approaches:**
+
+1. **HTTP Shim**: Your app POSTs logs/state to a Reflexive sidecar
+   ```bash
+   # Start reflexive as sidecar
+   reflexive --shim-mode --port 3099
+
+   # Your Go app sends logs via HTTP
+   curl -X POST localhost:3099/ingest -d '{"type":"log","message":"started"}'
+   ```
+
+2. **Stdout Protocol**: Reflexive parses structured stdout from any process
+   ```bash
+   # Your app prints JSON to stdout
+   echo '{"reflexive":"log","level":"info","msg":"User signed up"}'
+
+   # Reflexive CLI captures and parses it
+   reflexive --protocol=json ./my-rust-app
+   ```
+
+3. **Language-specific client libraries**: Lightweight clients that talk to Reflexive host
+   ```go
+   // TODO: Not yet implemented
+   import "github.com/anthropics/reflexive-go"
+
+   r := reflexive.Connect("localhost:3099")
+   r.Log("info", "Server started")
+   r.SetState("connections", 42)
+   ```
+
 ---
 
 ## License
