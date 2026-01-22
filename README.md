@@ -363,6 +363,89 @@ kill -SIGUSR1 <pid>  # Enables inspector
 reflexive --attach <pid>
 ```
 
+#### AI-Powered Breakpoints
+
+The agent can set breakpoints and receive full debugger state when hit:
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  inspector: {
+    enabled: true,
+    agentBreakpoints: true  // Allow agent to set/manage breakpoints
+  }
+});
+```
+
+**In chat:**
+```
+You: "Set a breakpoint on line 42 of server.js"
+Agent: [set_breakpoint: file="server.js", line=42]
+       Breakpoint set. I'll notify you when it's hit.
+
+... later, request comes in ...
+
+Agent: Breakpoint hit at server.js:42
+
+       Call Stack:
+       → handleRequest (server.js:42)
+         processMiddleware (middleware.js:18)
+         Server.emit (events.js:315)
+
+       Local Variables:
+       • req: IncomingMessage { method: "POST", url: "/api/users" }
+       • res: ServerResponse { statusCode: 200 }
+       • user: { id: 123, name: "Alice", email: "alice@..." }
+       • db: PostgresClient { connected: true }
+
+       Scopes:
+       • Local: req, res, user, db, config
+       • Closure: app, router, middleware
+       • Global: process, console, Buffer
+
+       What would you like me to inspect or do?
+
+You: "What's in user.permissions?"
+Agent: [evaluate: expression="user.permissions"]
+       user.permissions = ["read", "write", "admin"]
+
+You: "Step into the next function"
+Agent: [debugger_step: action="stepInto"]
+       Stepped to validateUser (auth.js:55)
+       ...
+
+You: "Continue execution"
+Agent: [debugger_continue]
+       Resumed. Breakpoint will trigger again on next hit.
+```
+
+**Planned Debugger MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `set_breakpoint` | Set breakpoint at file:line or function name |
+| `remove_breakpoint` | Remove a breakpoint |
+| `list_breakpoints` | Show all active breakpoints |
+| `get_call_stack` | Get current call stack when paused |
+| `get_scope_variables` | Get variables in local/closure/global scope |
+| `evaluate_expression` | Evaluate expression in current context |
+| `debugger_step` | Step into/over/out |
+| `debugger_continue` | Resume execution |
+| `debugger_pause` | Pause execution immediately |
+
+**Conditional Breakpoints:**
+```
+You: "Break on line 42 only when user.role === 'admin'"
+Agent: [set_breakpoint: file="server.js", line=42, condition="user.role === 'admin'"]
+```
+
+**Logpoints (non-breaking):**
+```
+You: "Add a logpoint on line 42 that logs the user object"
+Agent: [set_logpoint: file="server.js", line=42, expression="user"]
+       Logpoint set. Will log without pausing.
+```
+
 #### diagnostics_channel
 
 ```javascript
