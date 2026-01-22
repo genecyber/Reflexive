@@ -294,6 +294,60 @@ const r = makeReflexive({ transport: 'websocket' });
 // Events propagate across processes
 ```
 
+### Auto-Injection Mode (Hybrid CLI + Library)
+
+The CLI currently monitors apps externally (stdout/stderr). With auto-injection, it injects deep instrumentation into the child process:
+
+```bash
+# TODO: Not yet implemented
+reflexive app.js --inject  # Default in future versions
+
+# Internally runs:
+# node --require reflexive/inject app.js
+```
+
+This gives you **both** external control AND internal instrumentation:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  reflexive CLI (parent)                                 │
+│  - Process control (start/stop/restart)                 │
+│  - Dashboard server                                     │
+│  - Agent + MCP tools                                    │
+│  - File read/write/shell (with flags)                   │
+│                      ↕ IPC channel                      │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │  your-app.js (child) + reflexive/inject           │  │
+│  │  - Console interception (log/warn/error)          │  │
+│  │  - diagnostics_channel (http/net/fs)              │  │
+│  │  - perf_hooks (GC, event loop)                    │  │
+│  │  - Inspector integration (breakpoints)            │  │
+│  │  - process.reflexive.setState() API               │  │
+│  └───────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+**What injection enables:**
+
+| Feature | External Only | With Injection |
+|---------|---------------|----------------|
+| stdout/stderr | ✅ | ✅ |
+| File operations | ✅ | ✅ |
+| Process control | ✅ | ✅ |
+| Console.log capture | ❌ (just stdout) | ✅ (structured) |
+| HTTP request details | ❌ | ✅ (headers, body, timing) |
+| Database queries | ❌ | ✅ (query, params, duration) |
+| Custom app state | ❌ | ✅ (via process.reflexive) |
+| Event loop metrics | ❌ | ✅ |
+| Breakpoints | ❌ | ✅ |
+
+**App can expose state without importing reflexive:**
+```javascript
+// In your app - no import needed, reflexive/inject provides this
+process.reflexive?.setState('users.active', 42);
+process.reflexive?.setState('cache.hitRate', 0.95);
+```
+
 ### OpenTelemetry Integration
 
 Full integration with OpenTelemetry for zero-code auto-instrumentation:
