@@ -95,7 +95,7 @@ class AppState {
 
 function getDashboardHTML(options = {}) {
   const {
-    title = 'Reflexive',
+    title = '⚡ Reflexive',
     status = {},
     showControls = false,
     logsEndpoint = '/reflexive/logs',
@@ -702,7 +702,7 @@ function createIntrospectionServer(appState, options = {}) {
 export function makeReflexive(options = {}) {
   const {
     port = 3099,
-    title = 'Reflexive',
+    title = '⚡ Reflexive',
     systemPrompt = '',
     tools = [],
     onReady = () => {}
@@ -1305,7 +1305,7 @@ async function startCliDashboard(processManager, options) {
       if (pathname === '/' || pathname === '/dashboard') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(getDashboardHTML({
-          title: 'Reflexive CLI',
+          title: '⚡ Reflexive CLI',
           status: processManager.getState(),
           showControls: true,
           logsEndpoint: '/logs',
