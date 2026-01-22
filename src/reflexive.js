@@ -584,15 +584,18 @@ function getDashboardHTML(options = {}) {
     function renderMarkdown(text) {
       const rawHtml = marked.parse(text);
       const sanitized = DOMPurify.sanitize(rawHtml);
-      // Convert tool call patterns [tool_name] or [tool_name: params] to styled spans
-      const toolCallRegex = /\[([a-z_]+)(?::\s*([^\]]+))?\]/gi;
-      return sanitized.replace(toolCallRegex, (match, toolName, params) => {
-        const icon = '⚡';
-        const paramsHtml = params
-          ? '<span class="tool-call-params">' + params.trim() + '</span>'
-          : '';
-        return '<span class="tool-call"><span class="tool-call-icon">' + icon + '</span><span class="tool-call-name">' + toolName + '</span>' + paramsHtml + '</span>';
-      });
+      // Style tool calls: [tool_name] or [tool_name: params]
+      // After markdown parsing, real links become <a> tags, so remaining [...] are tool calls
+      try {
+        return sanitized.replace(/\[([a-z_][a-z0-9_]*)(?::\s*([^\]]*))?\]/gi, (match, name, params) => {
+          // Skip if it looks like it might be part of markdown that wasn't converted
+          if (name.length < 3) return match;
+          const paramsHtml = params ? '<span class="tool-call-params">' + params.trim() + '</span>' : '';
+          return '<span class="tool-call"><span class="tool-call-icon">⚡</span><span class="tool-call-name">' + name + '</span>' + paramsHtml + '</span>';
+        });
+      } catch (e) {
+        return sanitized; // Fallback if regex fails
+      }
     }
 
     function addUserMessage(text) {
