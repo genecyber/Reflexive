@@ -43,11 +43,18 @@ r.setState('activeUsers', 42);
 npm install reflexive
 ```
 
-Set your API key:
+**Authentication** (choose one):
 
 ```bash
+# Option 1: Use Claude Code CLI (recommended - no API key needed)
+npm install -g @anthropic-ai/claude-code
+claude  # Login with your Anthropic/Claude account
+
+# Option 2: Use API key directly
 export ANTHROPIC_API_KEY=your-api-key
 ```
+
+Using Claude Code CLI means you authenticate once and Reflexive uses those credentials automatically - no API key management needed.
 
 ## CLI Mode
 
