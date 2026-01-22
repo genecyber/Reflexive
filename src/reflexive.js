@@ -571,10 +571,22 @@ ${message}`;
     ...queryOptions
   };
 
+  let textBlockCount = 0;
+
   for await (const msg of query({ prompt: enrichedPrompt, options: fullOptions })) {
     // Handle streaming text deltas for real-time output
     if (msg.type === 'stream_event') {
       const event = msg.event;
+
+      // Track when new text blocks start - add newlines between them
+      if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
+        if (textBlockCount > 0) {
+          // Add double newline before subsequent text blocks
+          yield { type: 'text', content: '\n\n' };
+        }
+        textBlockCount++;
+      }
+
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
         yield { type: 'text', content: event.delta.text };
       }
