@@ -882,7 +882,8 @@ class ProcessManager {
       this.exitCode = code;
       this._log('system', `Exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`);
 
-      if (this.options.watch && code !== 0) {
+      // Only auto-restart on crash (non-zero exit code), not on signal kills (intentional stop/restart)
+      if (this.options.watch && code !== null && code !== 0) {
         setTimeout(() => this.restart(), 1000);
       }
     });
