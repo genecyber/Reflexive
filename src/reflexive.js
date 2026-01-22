@@ -481,6 +481,16 @@ function getDashboardHTML(options = {}) {
                   fullText += data.content;
                   updateBubbleContent(bubble, fullText);
                   messagesEl.scrollTop = messagesEl.scrollHeight;
+                } else if (data.type === 'tool') {
+                  // Format tool name (strip mcp__ prefix)
+                  const toolName = data.name.replace(/^mcp__[^_]+__/, '');
+                  const inputs = Object.entries(data.input || {})
+                    .map(([k, v]) => k + ': ' + JSON.stringify(v))
+                    .join(', ');
+                  const toolStr = inputs ? '[' + toolName + ': ' + inputs + ']' : '[' + toolName + ']';
+                  fullText += '\\n\\n' + toolStr + '\\n\\n';
+                  updateBubbleContent(bubble, fullText);
+                  messagesEl.scrollTop = messagesEl.scrollHeight;
                 } else if (data.type === 'error') {
                   updateBubbleContent(bubble, '**Error:** ' + data.message);
                 }
