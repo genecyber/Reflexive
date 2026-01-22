@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-src/node_modules/
 
 # Build output
 dist/
