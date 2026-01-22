@@ -1,11 +1,27 @@
 # Reflexive
 
-**AI-powered introspection for Node.js applications.** Built on the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk).
+**Build applications by talking to them.**
 
-Two ways to use it:
+Start with an empty file. Run it with Reflexive. Open the chat. Tell it what you want. Watch it build.
 
-1. **CLI Mode**: Run any Node.js app with an AI agent monitoring from outside
-2. **Library Mode**: Embed the agent inside your own app
+```bash
+echo "console.log('hello')" > app.js
+npx reflexive --write app.js
+# Open http://localhost:3099
+```
+
+Now tell it: *"Turn this into an Express server with a /users endpoint"*
+
+The agent can see your code, see it running, edit files, and restart the process. You iterate by chatting. The feedback loop is instant - you see stdout, errors, and behavior in real-time while the agent works.
+
+**This is not just monitoring. This is collaborative development with an AI that lives inside your running application.**
+
+---
+
+Built on the [Claude Agent SDK](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk). Two modes:
+
+1. **CLI Mode**: Run any Node.js app with an AI agent monitoring and modifying from outside
+2. **Library Mode**: Embed the agent inside your app for deeper introspection
 
 ```javascript
 import { makeReflexive } from 'reflexive';
