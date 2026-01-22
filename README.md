@@ -294,6 +294,138 @@ const r = makeReflexive({ transport: 'websocket' });
 // Events propagate across processes
 ```
 
+### OpenTelemetry Integration
+
+Full integration with OpenTelemetry for zero-code auto-instrumentation:
+
+```bash
+# TODO: Not yet implemented
+# Auto-instrument with OpenTelemetry + Reflexive
+node --require reflexive/otel ./app.js
+```
+
+```javascript
+// Or programmatic setup
+import { makeReflexive } from 'reflexive';
+import { otel } from 'reflexive/otel';
+
+const r = makeReflexive({
+  otel: {
+    enabled: true,
+    serviceName: 'my-app',
+    exporters: ['reflexive'],  // Send traces to Reflexive dashboard
+    instrumentations: ['http', 'express', 'pg', 'redis']
+  }
+});
+
+// Agent can now see:
+// - Distributed traces across services
+// - Database query performance
+// - HTTP request/response details
+// - Automatic span correlation
+```
+
+**Planned OTel MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `get_traces` | Query distributed traces |
+| `get_spans` | Get spans for a trace ID |
+| `get_slow_operations` | Find performance bottlenecks |
+| `get_service_map` | Visualize service dependencies |
+
+### Node.js Native Hooks
+
+Deep integration with Node.js built-in diagnostic APIs:
+
+#### Inspector Protocol
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  inspector: {
+    enabled: true,
+    breakOnError: true,  // Pause on uncaught exceptions
+    profiling: true      // CPU/memory profiling
+  }
+});
+
+// Agent can:
+// - Set breakpoints programmatically
+// - Inspect variables at runtime
+// - Take heap snapshots
+// - CPU profile on demand
+```
+
+```bash
+# Attach to already-running process (Linux/Mac)
+kill -SIGUSR1 <pid>  # Enables inspector
+reflexive --attach <pid>
+```
+
+#### diagnostics_channel
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  diagnostics: {
+    channels: ['http', 'net', 'fs', 'worker_threads'],
+    custom: ['my-app:requests', 'my-app:jobs']
+  }
+});
+
+// Subscribes to Node.js diagnostic channels:
+// - http.client.request / http.server.request
+// - net.client.socket / net.server.socket
+// - fs operations
+// - Worker thread lifecycle
+```
+
+**Planned Diagnostics MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `get_active_handles` | List open handles (sockets, files, timers) |
+| `get_active_requests` | In-flight async operations |
+| `subscribe_channel` | Live stream from diagnostic channel |
+| `get_event_loop_stats` | Event loop lag, utilization |
+
+#### perf_hooks
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  perf: {
+    enabled: true,
+    gcStats: true,        // Garbage collection metrics
+    eventLoopStats: true, // Event loop delay histogram
+    resourceTiming: true  // HTTP resource timing
+  }
+});
+
+// Agent can query:
+// - GC pause times and frequency
+// - Event loop lag percentiles
+// - DNS/TCP/TLS timing breakdown
+```
+
+#### Runtime Code Injection
+
+```javascript
+// TODO: Not yet implemented - DANGEROUS, requires explicit opt-in
+const r = makeReflexive({
+  inspector: {
+    allowEval: true  // Let agent run code in your process
+  }
+});
+
+// Agent can then use Runtime.evaluate to:
+// - Inspect any variable
+// - Call functions
+// - Patch behavior at runtime
+// - Hot-reload code
+```
+
 ### Python Support
 
 Native Python implementation using the Python Claude Agent SDK:
