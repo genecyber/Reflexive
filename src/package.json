@@ -1,0 +1,54 @@
+{
+  "name": "reflexive",
+  "version": "0.1.0",
+  "description": "Make your application self-aware. Embed Claude Agent SDK with deep process introspection.",
+  "type": "module",
+  "main": "./src/index.js",
+  "bin": {
+    "reflexive": "./bin/reflexive.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./next": "./src/adapters/next.js"
+  },
+  "scripts": {
+    "example": "node examples/express-basic.js",
+    "example:standalone": "node examples/standalone.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "ai",
+    "claude",
+    "anthropic",
+    "introspection",
+    "debugging",
+    "agent",
+    "reflexive",
+    "llm",
+    "claude-code",
+    "claude-agent-sdk",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "zod": "^3.24.1",
+    "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0 || ^5.0.0",
+    "next": "^13.0.0 || ^14.0.0 || ^15.0.0"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "next": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
