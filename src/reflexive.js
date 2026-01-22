@@ -10,7 +10,7 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
-import { existsSync, watch } from 'fs';
+import { existsSync, watch, realpathSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
@@ -98,9 +98,11 @@ function getDashboardHTML(options = {}) {
     title = '⚡ Reflexive',
     status = {},
     showControls = false,
+    interactive = false,
     logsEndpoint = '/reflexive/logs',
     statusEndpoint = '/reflexive/status',
-    chatEndpoint = '/reflexive/chat'
+    chatEndpoint = '/reflexive/chat',
+    cliInputEndpoint = '/cli-input'
   } = options;
 
   const controlsHTML = showControls ? `
@@ -323,6 +325,95 @@ function getDashboardHTML(options = {}) {
     .metric { display: flex; gap: 4px; }
     .metric-label { color: #666; }
     .metric-value { color: #fff; }
+
+    /* Interactive mode styles */
+    .interactive-panel { display: ${interactive ? 'flex' : 'none'}; flex-direction: column; gap: 8px; padding: 12px; border-top: 1px solid #222; background: #0d0d12; }
+    .cli-input-area { display: flex; gap: 8px; }
+    .cli-input {
+      flex: 1;
+      padding: 10px 12px;
+      background: #1a2e1a;
+      border: 1px solid #2d5a2d;
+      border-radius: 6px;
+      color: #4ade80;
+      font-size: 0.85rem;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+    .cli-input:focus { outline: none; border-color: #22c55e; }
+    .cli-input::placeholder { color: #4ade8066; }
+    .cli-send {
+      padding: 10px 16px;
+      background: #166534;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.85rem;
+    }
+    .cli-send:hover { background: #15803d; }
+    .cli-send:disabled { opacity: 0.5; }
+    .waiting-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: #22c55e;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .waiting-indicator.hidden { display: none; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .input-mode-toggle {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    .mode-btn {
+      padding: 4px 10px;
+      background: #16161d;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.7rem;
+    }
+    .mode-btn.active { background: #1e3a5f; border-color: #3b82f6; color: #fff; }
+    .mode-btn:hover { background: #222; }
+    .agent-auto-wrapper {
+      display: flex;
+      align-items: center;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #222;
+    }
+    .agent-auto-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: #888;
+      cursor: pointer;
+    }
+    .agent-auto-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #3b82f6;
+      cursor: pointer;
+    }
+    .agent-auto-label:hover { color: #fff; }
+    .agent-auto-label.active { color: #3b82f6; }
+    .agent-thinking {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.75rem;
+      color: #3b82f6;
+      margin-left: auto;
+    }
+    .agent-thinking.visible { display: flex; }
   </style>
 </head>
 <body>
@@ -344,10 +435,31 @@ function getDashboardHTML(options = {}) {
         </div>
         <div class="chat-messages" id="messages"></div>
         <div class="chat-input-area">
-          <div class="chat-input-wrapper">
-            <input class="chat-input" id="input" placeholder="Ask about your app..." />
+          ${interactive ? `
+          <div class="input-mode-toggle">
+            <button class="mode-btn active" id="mode-agent">Ask Agent</button>
+            <button class="mode-btn" id="mode-cli">Direct to CLI</button>
+            <div class="waiting-indicator hidden" id="waiting-indicator">
+              <span>●</span> CLI waiting for input
+            </div>
+          </div>
+          ` : ''}
+          <div class="chat-input-wrapper" id="agent-input-wrapper">
+            <input class="chat-input" id="input" placeholder="${interactive ? 'Ask the agent about the CLI...' : 'Ask about your app...'}" />
             <button class="chat-send" id="send">Send</button>
           </div>
+          ${interactive ? `
+          <div class="cli-input-area" id="cli-input-wrapper" style="display: none;">
+            <input class="cli-input" id="cli-input" placeholder="Type directly to the CLI..." />
+            <button class="cli-send" id="cli-send">Send to CLI</button>
+          </div>
+          <div class="agent-auto-wrapper">
+            <label class="agent-auto-label">
+              <input type="checkbox" id="agent-auto-handle" />
+              <span>Let agent handle CLI responses</span>
+            </label>
+          </div>
+          ` : ''}
         </div>
       </div>
 
@@ -384,6 +496,60 @@ function getDashboardHTML(options = {}) {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function ansiToHtml(text) {
+      // Convert ANSI escape codes to HTML spans
+      const ansiColors = {
+        '30': '#000', '31': '#ef4444', '32': '#22c55e', '33': '#eab308',
+        '34': '#3b82f6', '35': '#a855f7', '36': '#06b6d4', '37': '#e5e5e5',
+        '90': '#737373', '91': '#fca5a5', '92': '#86efac', '93': '#fde047',
+        '94': '#93c5fd', '95': '#d8b4fe', '96': '#67e8f9', '97': '#fff'
+      };
+      // First strip the ANSI codes and collect style info
+      let openSpans = 0;
+      const ESC = String.fromCharCode(27);
+      let result = '';
+      let i = 0;
+      while (i < text.length) {
+        if (text[i] === ESC && text[i+1] === '[') {
+          // Found ANSI escape sequence
+          let j = i + 2;
+          while (j < text.length && /[0-9;]/.test(text[j])) j++;
+          if (text[j] === 'm') {
+            const codes = text.slice(i+2, j);
+            if (!codes || codes === '0' || codes === '22' || codes === '39') {
+              if (openSpans > 0) { result += '</span>'; openSpans--; }
+            } else {
+              const parts = codes.split(';');
+              let style = '';
+              for (const code of parts) {
+                if (code === '1') style += 'font-weight:bold;';
+                else if (code === '3') style += 'font-style:italic;';
+                else if (code === '4') style += 'text-decoration:underline;';
+                else if (ansiColors[code]) style += 'color:' + ansiColors[code] + ';';
+              }
+              if (style) { result += '<span style="' + style + '">'; openSpans++; }
+            }
+            i = j + 1;
+            continue;
+          }
+        }
+        // Escape HTML chars
+        const c = text[i];
+        if (c === '<') result += '&lt;';
+        else if (c === '>') result += '&gt;';
+        else if (c === '&') result += '&amp;';
+        else result += c;
+        i++;
+      }
+      while (openSpans > 0) { result += '</span>'; openSpans--; }
+      return result;
+    }
+
+    function stripAnsi(text) {
+      const ESC = String.fromCharCode(27);
+      return text.replace(new RegExp(ESC + '\\\\[[0-9;]*[a-zA-Z]', 'g'), '');
     }
 
     function renderMarkdown(text) {
@@ -518,14 +684,251 @@ function getDashboardHTML(options = {}) {
       if (e.key === 'Enter') sendMessage();
     };
 
+    ${interactive ? `
+    // Interactive mode handling
+    const modeAgentBtn = document.getElementById('mode-agent');
+    const modeCliBtn = document.getElementById('mode-cli');
+    const agentInputWrapper = document.getElementById('agent-input-wrapper');
+    const cliInputWrapper = document.getElementById('cli-input-wrapper');
+    const cliInputEl = document.getElementById('cli-input');
+    const cliSendBtn = document.getElementById('cli-send');
+    const agentAssistBtn = document.getElementById('agent-assist');
+    const waitingIndicator = document.getElementById('waiting-indicator');
+    let currentMode = 'agent';
+
+    function setMode(mode) {
+      currentMode = mode;
+      if (mode === 'agent') {
+        modeAgentBtn.classList.add('active');
+        modeCliBtn.classList.remove('active');
+        agentInputWrapper.style.display = 'flex';
+        cliInputWrapper.style.display = 'none';
+        inputEl.focus();
+      } else {
+        modeAgentBtn.classList.remove('active');
+        modeCliBtn.classList.add('active');
+        agentInputWrapper.style.display = 'none';
+        cliInputWrapper.style.display = 'flex';
+        cliInputEl.focus();
+      }
+    }
+
+    modeAgentBtn.onclick = () => setMode('agent');
+    modeCliBtn.onclick = () => setMode('cli');
+
+    async function sendCliInput() {
+      const text = cliInputEl.value.trim();
+      if (!text) return;
+
+      cliInputEl.value = '';
+
+      // Show in chat as user action
+      const div = document.createElement('div');
+      div.className = 'message user';
+      const meta = document.createElement('div');
+      meta.className = 'message-meta';
+      meta.textContent = 'you → cli';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.style.background = '#1a2e1a';
+      bubble.style.fontFamily = "'SF Mono', Monaco, monospace";
+      bubble.textContent = text;
+      div.appendChild(meta);
+      div.appendChild(bubble);
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      // Send to CLI
+      try {
+        await fetch('${cliInputEndpoint}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: text })
+        });
+        waitingIndicator.classList.add('hidden');
+      } catch (e) {
+        console.error('Failed to send CLI input:', e);
+      }
+    }
+
+    cliSendBtn.onclick = sendCliInput;
+    cliInputEl.onkeydown = (e) => {
+      if (e.key === 'Enter') sendCliInput();
+    };
+
+    const agentAutoCheckbox = document.getElementById('agent-auto-handle');
+    const agentAutoLabel = document.querySelector('.agent-auto-label');
+    let agentAutoHandling = false;
+    let lastHandledLogCount = 0;
+
+    agentAutoCheckbox.onchange = () => {
+      agentAutoLabel.classList.toggle('active', agentAutoCheckbox.checked);
+      if (agentAutoCheckbox.checked) {
+        // Reset to current log count so we don't immediately trigger
+        lastHandledLogCount = -1; // Will be set on next refresh
+      }
+    };
+
+    async function triggerAgentAutoResponse() {
+      if (agentAutoHandling) return;
+      agentAutoHandling = true;
+
+      // Show thinking in chat
+      const div = document.createElement('div');
+      div.className = 'message assistant';
+      div.id = 'agent-auto-thinking';
+      const meta = document.createElement('div');
+      meta.className = 'message-meta';
+      meta.textContent = 'agent (auto)';
+      const thinking = document.createElement('div');
+      thinking.className = 'thinking';
+      for (let i = 0; i < 3; i++) thinking.appendChild(document.createElement('span'));
+      div.appendChild(meta);
+      div.appendChild(thinking);
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      try {
+        const res = await fetch('${chatEndpoint}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: 'AUTO_RESPOND_TO_CLI: The CLI is waiting for input. Look at the recent output, understand what it is asking or expecting, and use the send_input tool to respond appropriately. Do not ask me - just handle it directly.',
+            autoRespond: true
+          })
+        });
+
+        document.getElementById('agent-auto-thinking')?.remove();
+        const bubble = createStreamingMessage();
+        let fullText = '';
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'text') {
+                  fullText += data.content;
+                  updateBubbleContent(bubble, fullText);
+                  messagesEl.scrollTop = messagesEl.scrollHeight;
+                } else if (data.type === 'tool') {
+                  const toolName = data.name.replace(/^mcp__[^_]+__/, '');
+                  if (toolName === 'send_input') {
+                    fullText += '\\n\\n→ Sent to CLI: ' + (data.input?.input || '') + '\\n\\n';
+                  } else {
+                    const inputs = Object.entries(data.input || {})
+                      .map(([k, v]) => k + ': ' + JSON.stringify(v))
+                      .join(', ');
+                    fullText += '\\n\\n[' + toolName + ': ' + inputs + ']\\n\\n';
+                  }
+                  updateBubbleContent(bubble, fullText);
+                  messagesEl.scrollTop = messagesEl.scrollHeight;
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {
+        document.getElementById('agent-auto-thinking')?.remove();
+        console.error('Agent auto-response failed:', e);
+      }
+
+      agentAutoHandling = false;
+    }
+
+    // Check for waiting state in refresh and stream CLI output to chat
+    let lastLogIndex = 0;
+    const originalRefresh = refresh;
+    refresh = async function() {
+      await originalRefresh();
+      try {
+        const state = await fetch('${statusEndpoint}').then(r => r.json());
+        const logs = await fetch('${logsEndpoint}?count=200').then(r => r.json());
+
+        // Stream new CLI output to chat panel (batched)
+        if (logs.length > lastLogIndex) {
+          const newLogs = logs.slice(lastLogIndex);
+          // Batch consecutive stdout/stderr into single messages
+          let currentBatch = [];
+          let currentType = null;
+
+          const flushBatch = () => {
+            if (currentBatch.length === 0) return;
+            const rawText = currentBatch.join(String.fromCharCode(10));
+            const strippedText = stripAnsi(rawText);
+            if (!strippedText.trim()) { currentBatch = []; return; }
+
+            const div = document.createElement('div');
+            div.className = 'message assistant';
+            const meta = document.createElement('div');
+            meta.className = 'message-meta';
+            meta.textContent = 'cli';
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.style.background = currentType === 'stderr' ? '#2d1a1a' : '#1a1a24';
+            bubble.style.fontFamily = "'SF Mono', Monaco, monospace";
+            bubble.style.fontSize = '0.8rem';
+            bubble.style.whiteSpace = 'pre-wrap';
+            // Use DOMPurify to sanitize the ANSI-to-HTML conversion
+            bubble.innerHTML = DOMPurify.sanitize(ansiToHtml(rawText));
+            div.appendChild(meta);
+            div.appendChild(bubble);
+            messagesEl.appendChild(div);
+            currentBatch = [];
+          };
+
+          for (const log of newLogs) {
+            if (log.type === 'stdout' || log.type === 'stderr') {
+              if (currentType !== null && currentType !== log.type) {
+                flushBatch();
+              }
+              currentType = log.type;
+              currentBatch.push(log.message);
+            }
+          }
+          flushBatch();
+          lastLogIndex = logs.length;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        if (state.waitingForInput) {
+          waitingIndicator.classList.remove('hidden');
+
+          // Auto-respond if checkbox is checked and we have new output
+          if (agentAutoCheckbox.checked && !agentAutoHandling) {
+            if (lastHandledLogCount === -1) {
+              // First check after enabling - set baseline
+              lastHandledLogCount = logs.length;
+            } else if (logs.length > lastHandledLogCount) {
+              // New output since last handled - trigger auto response
+              lastHandledLogCount = logs.length;
+              triggerAgentAutoResponse();
+            }
+          }
+        } else {
+          waitingIndicator.classList.add('hidden');
+        }
+      } catch (e) {}
+    };
+    ` : ''}
+
     ${controlsScript}
 
     function renderLogs(logs) {
-      logsEl.innerHTML = logs.map(l =>
+      logsEl.innerHTML = DOMPurify.sanitize(logs.map(l =>
         '<div class="log-entry ' + l.type + '">' +
         '<span class="log-type">' + l.type + '</span>' +
-        '<span class="log-message">' + escapeHtml(l.message) + '</span></div>'
-      ).join('');
+        '<span class="log-message">' + ansiToHtml(l.message) + '</span></div>'
+      ).join(''));
       logsEl.scrollTop = logsEl.scrollHeight;
     }
 
@@ -846,6 +1249,36 @@ class ProcessManager {
     this.maxLogs = 500;
     this.exitCode = null;
     this.watcher = null;
+    // Interactive mode state
+    this.interactive = options.interactive || false;
+    this.waitingForInput = false;
+    this.lastOutputTime = null;
+    this.inputPromptPatterns = [
+      /^You:\s*$/m,
+      /^>\s*$/m,
+      /\?\s*$/m,
+      /:\s*$/m,
+      />>>\s*$/m,
+      /\$\s*$/m,
+      /input:/i,
+      /enter.*:/i,
+      /prompt>/i
+    ];
+    this.pendingOutput = '';
+    this.outputSettleTimeout = null;
+    this.eventHandlers = new Map();
+  }
+
+  on(event, handler) {
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, []);
+    }
+    this.eventHandlers.get(event).push(handler);
+  }
+
+  emit(event, data) {
+    const handlers = this.eventHandlers.get(event) || [];
+    handlers.forEach(h => h(data));
   }
 
   start() {
@@ -853,28 +1286,41 @@ class ProcessManager {
 
     const args = [...this.options.nodeArgs, this.entry, ...this.options.appArgs];
 
+    // In interactive mode, pipe stdin so we can send input programmatically
+    const stdinMode = this.interactive ? 'pipe' : 'inherit';
+
     this.child = spawn(process.execPath, args, {
       cwd: this.cwd,
       env: { ...process.env, FORCE_COLOR: '1' },
-      stdio: ['inherit', 'pipe', 'pipe']
+      stdio: [stdinMode, 'pipe', 'pipe']
     });
 
     this.isRunning = true;
     this.startTime = Date.now();
     this.exitCode = null;
+    this.waitingForInput = false;
+    this.pendingOutput = '';
 
-    this._log('system', `Started: node ${args.join(' ')}`);
+    this._log('system', `Started: node ${args.join(' ')}${this.interactive ? ' (interactive mode)' : ''}`);
 
     this.child.stdout.on('data', (data) => {
       const text = data.toString();
       process.stdout.write(text);
       this._log('stdout', text.trim());
+
+      if (this.interactive) {
+        this._handleInteractiveOutput(text, 'stdout');
+      }
     });
 
     this.child.stderr.on('data', (data) => {
       const text = data.toString();
       process.stderr.write(text);
       this._log('stderr', text.trim());
+
+      if (this.interactive) {
+        this._handleInteractiveOutput(text, 'stderr');
+      }
     });
 
     this.child.on('exit', (code, signal) => {
@@ -936,6 +1382,61 @@ class ProcessManager {
     }
   }
 
+  _handleInteractiveOutput(text, source) {
+    this.lastOutputTime = Date.now();
+    this.pendingOutput += text;
+
+    // Clear any existing settle timeout
+    if (this.outputSettleTimeout) {
+      clearTimeout(this.outputSettleTimeout);
+    }
+
+    // Check for prompt patterns immediately
+    const looksLikePrompt = this.inputPromptPatterns.some(pattern =>
+      pattern.test(this.pendingOutput.slice(-100))
+    );
+
+    // Set a timeout to detect when output has "settled" (CLI is waiting)
+    // Use longer timeouts to give CLI apps time to finish streaming
+    this.outputSettleTimeout = setTimeout(() => {
+      // Output has settled - CLI is likely waiting for input
+      const wasWaiting = this.waitingForInput;
+      this.waitingForInput = true;
+
+      if (!wasWaiting) {
+        // Emit event with the output that led to this prompt
+        this.emit('waitingForInput', {
+          output: this.pendingOutput,
+          looksLikePrompt,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Reset pending output after emitting
+      this.pendingOutput = '';
+    }, looksLikePrompt ? 10000 : 10000); // 10 seconds - give streaming chat apps time to finish
+  }
+
+  sendInput(text, addNewline = true) {
+    if (!this.child || !this.child.stdin) {
+      return false;
+    }
+
+    this.waitingForInput = false;
+    const input = addNewline ? text + '\n' : text;
+    this.child.stdin.write(input);
+    this._log('stdin', text);
+    this.emit('inputSent', { text, timestamp: new Date().toISOString() });
+    return true;
+  }
+
+  getRecentOutput(lines = 20) {
+    const recent = this.logs
+      .filter(l => l.type === 'stdout' || l.type === 'stderr')
+      .slice(-lines);
+    return recent.map(l => l.message).join('\n');
+  }
+
   _setupWatcher() {
     let debounceTimer = null;
 
@@ -963,7 +1464,9 @@ class ProcessManager {
       restartCount: this.restartCount,
       exitCode: this.exitCode,
       entry: this.entry,
-      cwd: this.cwd
+      cwd: this.cwd,
+      interactive: this.interactive,
+      waitingForInput: this.waitingForInput
     };
   }
 
@@ -1140,6 +1643,30 @@ function getAllowedTools(capabilities) {
 function buildSystemPrompt(processManager, options) {
   const state = processManager.getState();
 
+  const interactiveSection = options.interactive ? `
+## Interactive Mode ENABLED
+
+This is an interactive CLI application. The process communicates via stdin/stdout.
+
+**CRITICAL: Two types of requests you'll receive:**
+
+1. **AUTO_RESPOND_TO_CLI requests** - When the message starts with "AUTO_RESPOND_TO_CLI":
+   - The user wants you to DIRECTLY respond to the CLI
+   - You MUST use the \`send_input\` tool to send your response
+   - Look at the recent CLI output to understand what it's asking
+   - Formulate an appropriate response and send it immediately
+   - Be conversational and natural - you're talking to another AI/CLI
+   - Do NOT ask the user what to say - just respond intelligently
+
+2. **Normal user questions** - Any other message:
+   - The user is asking YOU a question
+   - Respond to the USER, not the CLI
+   - Help them understand what's happening, suggest responses, explain things
+   - Only use \`send_input\` if they explicitly ask you to send something to the CLI
+
+**The \`send_input\` tool** sends text directly to the CLI's stdin. The CLI will receive your text as if the user typed it.
+` : '';
+
   return `# Reflexive CLI Agent
 
 You are an AI assistant monitoring and controlling a Node.js process from the outside.
@@ -1151,13 +1678,15 @@ You are an AI assistant monitoring and controlling a Node.js process from the ou
 - PID: ${state.pid || 'N/A'}
 - Uptime: ${state.uptime}s
 - Restarts: ${state.restartCount}
+${options.interactive ? `- Mode: INTERACTIVE (stdin/stdout proxied)` : ''}
+${state.waitingForInput ? `- ⚠️ CLI IS WAITING FOR INPUT` : ''}
 
 ## Your Capabilities
 - Read files: YES
 - Write files: ${options.capabilities.writeFiles ? 'YES' : 'NO'}
 - Shell access: ${options.capabilities.shellAccess ? 'YES' : 'NO'}
 - Restart process: ${options.capabilities.restart ? 'YES' : 'NO'}
-
+${interactiveSection}
 ## CLI-Specific Tools
 In addition to file tools, you have:
 - \`get_process_state\` - Get process status, PID, uptime
@@ -1165,7 +1694,7 @@ In addition to file tools, you have:
 - \`search_logs\` - Search through output logs
 - \`restart_process\` - Restart the process
 - \`stop_process\` / \`start_process\` - Control process lifecycle
-- \`send_input\` - Send text to the process stdin
+- \`send_input\` - Send text to the process stdin${options.interactive ? ' (USE THIS to respond to the CLI)' : ''}
 
 ## Guidelines
 1. Use get_output_logs to see what the process is doing
@@ -1187,6 +1716,7 @@ function parseArgs(args) {
     host: 'localhost',
     open: false,
     watch: false,
+    interactive: false,
     capabilities: {
       readFiles: true,
       writeFiles: false,
@@ -1210,6 +1740,8 @@ function parseArgs(args) {
       options.open = true;
     } else if (arg === '--watch' || arg === '-w') {
       options.watch = true;
+    } else if (arg === '--interactive' || arg === '-i') {
+      options.interactive = true;
     } else if (arg === '--capabilities' || arg === '-c') {
       const caps = args[++i].split(',');
       for (const cap of caps) {
@@ -1254,6 +1786,7 @@ OPTIONS:
   -h, --host <host>       Dashboard host (default: localhost)
   -o, --open              Open dashboard in browser
   -w, --watch             Restart on file changes
+  -i, --interactive       Interactive mode: proxy stdin/stdout through agent
   -c, --capabilities      Enable capabilities (comma-separated)
       --write             Enable file writing
       --shell             Enable shell access
@@ -1308,10 +1841,29 @@ async function startCliDashboard(processManager, options) {
           title: '⚡ Reflexive CLI',
           status: processManager.getState(),
           showControls: true,
+          interactive: options.interactive,
           logsEndpoint: '/logs',
           statusEndpoint: '/state',
-          chatEndpoint: '/chat'
+          chatEndpoint: '/chat',
+          cliInputEndpoint: '/cli-input'
         }));
+        return;
+      }
+
+      // Interactive mode: direct CLI input
+      if (pathname === '/cli-input' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { input } = JSON.parse(body);
+
+        if (input && options.interactive) {
+          processManager.sendInput(input);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, sent: input }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Interactive mode not enabled or no input' }));
+        }
         return;
       }
 
@@ -1327,9 +1879,11 @@ async function startCliDashboard(processManager, options) {
         }
 
         const state = processManager.getState();
-        const recentLogs = processManager.getLogs(10);
-        const contextSummary = `Process: ${state.isRunning ? 'running' : 'stopped'}, PID: ${state.pid}, uptime: ${state.uptime}s
-Recent output: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+        const recentLogs = processManager.getLogs(options.interactive ? 30 : 10);
+        const recentOutput = options.interactive
+          ? `\n\nRecent CLI output (read carefully):\n---\n${recentLogs.filter(l => l.type === 'stdout' || l.type === 'stderr').slice(-15).map(l => l.message).join('\n')}\n---`
+          : `\nRecent output: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+        const contextSummary = `Process: ${state.isRunning ? 'running' : 'stopped'}, PID: ${state.pid}, uptime: ${state.uptime}s${state.waitingForInput ? ', ⚠️ WAITING FOR INPUT' : ''}${recentOutput}`;
 
         const chatStream = createChatStream(message, {
           contextSummary,
@@ -1432,6 +1986,7 @@ Reflexive CLI
   Dashboard: ${url}
   Entry:     ${resolve(options.entry)}
   Watch:     ${options.watch ? 'enabled' : 'disabled'}
+  Interactive: ${options.interactive ? 'enabled (stdin proxied)' : 'disabled'}
 
   Capabilities:
     Read files:    yes
@@ -1448,6 +2003,9 @@ Reflexive CLI
   }
 
   processManager.start();
+
+  // Ignore SIGHUP so process survives terminal closing
+  process.on('SIGHUP', () => {});
 
   process.on('SIGINT', async () => {
     console.log('\nShutting down...');
@@ -1467,8 +2025,10 @@ Reflexive CLI
 
 export { AppState, createIntrospectionServer };
 
-// Run CLI if executed directly
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+// Run CLI if executed directly (handle symlinks by resolving real paths)
+const scriptPath = fileURLToPath(import.meta.url);
+const argPath = process.argv[1];
+const isMainModule = realpathSync(scriptPath) === realpathSync(argPath);
 if (isMainModule) {
   main().catch((err) => {
     console.error('Fatal error:', err);

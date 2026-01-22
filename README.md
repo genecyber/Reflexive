@@ -88,11 +88,38 @@ OPTIONS:
   -h, --host <host>       Dashboard host (default: localhost)
   -o, --open              Open dashboard in browser
   -w, --watch             Restart on file changes
+  -i, --interactive       Interactive mode for CLI chat apps
       --write             Enable file writing
       --shell             Enable shell access
       --node-args <args>  Arguments to pass to Node.js
       --help              Show help
 ```
+
+### Interactive Mode
+
+For **interactive CLI applications** (chat apps, REPLs, prompts), use the `-i` flag:
+
+```bash
+# Run an interactive chat CLI through Reflexive
+reflexive -i ./my-chat-cli.js
+
+# With write access so agent can modify code
+reflexive -i --write ./my-cli.js chat
+```
+
+Interactive mode:
+- **Proxies stdin/stdout** through the dashboard
+- **Streams CLI output** into the chat panel with ANSI color support
+- **Detects when CLI is waiting for input** (10 second settle time for streaming responses)
+- **Two input modes**: "Ask Agent" (talk to Reflexive) vs "Direct to CLI" (type to the CLI)
+- **Auto-handle checkbox**: Let the agent automatically respond to the CLI
+
+When "Let agent handle CLI responses" is checked:
+1. Agent watches the CLI output
+2. Waits for output to stop (CLI waiting for input)
+3. Automatically formulates and sends a response via `send_input`
+
+This enables **AI-to-AI conversations** where Reflexive's agent talks to your interactive CLI.
 
 ### CLI Agent Capabilities
 
