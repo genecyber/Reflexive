@@ -591,15 +591,21 @@ ${systemPrompt}`;
       permissionMode: 'bypassPermissions',
       maxTurns: 50,
       mcpServers: { 'reflexive': mcpServer },
-      systemPrompt: baseSystemPrompt
+      systemPrompt: baseSystemPrompt,
+      includePartialMessages: true
     };
 
     for await (const msg of query({ prompt: enrichedPrompt, options: queryOptions })) {
+      // Handle streaming text deltas for real-time output
+      if (msg.type === 'stream_event') {
+        const event = msg.event;
+        if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+          yield { type: 'text', content: event.delta.text };
+        }
+      }
+      // Handle complete messages for tool use notifications
       if (msg.type === 'assistant') {
         for (const block of msg.message.content) {
-          if (block.type === 'text') {
-            yield { type: 'text', content: block.text };
-          }
           if (block.type === 'tool_use') {
             yield { type: 'tool', name: block.name, input: block.input };
           }
