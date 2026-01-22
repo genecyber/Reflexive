@@ -3,13 +3,12 @@
   "version": "0.1.0",
   "description": "Make your application self-aware. Embed Claude Agent SDK with deep process introspection.",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./reflexive.js",
   "bin": {
-    "reflexive": "./bin/reflexive.js"
+    "reflexive": "./reflexive.js"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./next": "./src/adapters/next.js"
+    ".": "./reflexive.js"
   },
   "scripts": {
     "example": "node examples/express-basic.js",

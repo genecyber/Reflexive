@@ -2,10 +2,10 @@
 // Run with: node demo-instrumented.js
 
 import http from 'http';
-import { instrument } from './src/index.js';
+import { makeReflexive } from './src/reflexive.js';
 
 // Instrument this process - starts dashboard on port 3099
-const reflexive = instrument({
+const reflexive = makeReflexive({
   port: 3099,
   title: 'Task Queue Demo',
   systemPrompt: `This is a task queue simulation app. It has:
