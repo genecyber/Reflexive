@@ -901,18 +901,19 @@ class ProcessManager {
     if (!this.isRunning || !this.child) return Promise.resolve();
 
     return new Promise((resolve) => {
+      const killTimeout = setTimeout(() => {
+        if (this.isRunning) {
+          this.child.kill('SIGKILL');
+        }
+      }, 5000);
+
       this.child.once('exit', () => {
+        clearTimeout(killTimeout);
         this.isRunning = false;
         resolve();
       });
 
       this.child.kill('SIGTERM');
-
-      setTimeout(() => {
-        if (this.isRunning) {
-          this.child.kill('SIGKILL');
-        }
-      }, 5000);
     });
   }
 
