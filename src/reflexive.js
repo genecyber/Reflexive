@@ -1267,6 +1267,13 @@ class ProcessManager {
     this.pendingOutput = '';
     this.outputSettleTimeout = null;
     this.eventHandlers = new Map();
+    // Injection mode state
+    this.inject = options.inject || false;
+    this.injectedState = {};
+    this.injectionReady = false;
+    // Eval callbacks
+    this.evalCallbacks = new Map();
+    this.evalIdCounter = 0;
   }
 
   on(event, handler) {
@@ -1284,15 +1291,36 @@ class ProcessManager {
   start() {
     if (this.isRunning) return;
 
-    const args = [...this.options.nodeArgs, this.entry, ...this.options.appArgs];
+    // Build node args, adding --require for injection if enabled
+    const nodeArgs = [...this.options.nodeArgs];
+    if (this.inject) {
+      const injectPath = resolve(dirname(fileURLToPath(import.meta.url)), 'inject.cjs');
+      nodeArgs.unshift('--require', injectPath);
+    }
+
+    const args = [...nodeArgs, this.entry, ...this.options.appArgs];
 
     // In interactive mode, pipe stdin so we can send input programmatically
     const stdinMode = this.interactive ? 'pipe' : 'inherit';
 
+    // Add IPC channel if injection is enabled
+    const stdio = this.inject
+      ? [stdinMode, 'pipe', 'pipe', 'ipc']
+      : [stdinMode, 'pipe', 'pipe'];
+
+    // Set up environment for injection
+    const env = { ...process.env, FORCE_COLOR: '1' };
+    if (this.inject) {
+      env.REFLEXIVE_INJECT = 'true';
+    }
+    if (this.options.eval) {
+      env.REFLEXIVE_EVAL = 'true';
+    }
+
     this.child = spawn(process.execPath, args, {
       cwd: this.cwd,
-      env: { ...process.env, FORCE_COLOR: '1' },
-      stdio: [stdinMode, 'pipe', 'pipe']
+      env,
+      stdio
     });
 
     this.isRunning = true;
@@ -1338,6 +1366,14 @@ class ProcessManager {
       this._log('error', `Process error: ${err.message}`);
     });
 
+    // Handle IPC messages from injected child process
+    if (this.inject) {
+      this.child.on('message', (msg) => {
+        if (!msg || !msg.reflexive) return;
+        this._handleInjectedMessage(msg);
+      });
+    }
+
     if (this.options.watch && !this.watcher) {
       this._setupWatcher();
     }
@@ -1380,6 +1416,160 @@ class ProcessManager {
     if (this.logs.length > this.maxLogs) {
       this.logs.shift();
     }
+  }
+
+  _handleInjectedMessage(msg) {
+    const { type, data, timestamp } = msg;
+
+    switch (type) {
+      case 'ready':
+        this.injectionReady = true;
+        this._log('system', `[inject] Injection ready - pid: ${data.pid}, node: ${data.nodeVersion}`);
+        this.emit('injectionReady', data);
+        break;
+
+      case 'log':
+        // Logs from intercepted console methods
+        const level = data.level || 'info';
+        this._log(`inject:${level}`, data.message);
+        this.emit('injectedLog', { level, message: data.message, meta: data.meta, timestamp });
+        break;
+
+      case 'error':
+        // Uncaught exceptions and unhandled rejections
+        this._log('inject:error', `[${data.type}] ${data.name}: ${data.message}`);
+        if (data.stack) {
+          this._log('inject:error', data.stack);
+        }
+        this.emit('injectedError', data);
+        break;
+
+      case 'state':
+        // State updates from process.reflexive.setState()
+        this.injectedState[data.key] = data.value;
+        this._log('inject:state', `State: ${data.key} = ${JSON.stringify(data.value)}`);
+        this.emit('injectedState', data);
+        break;
+
+      case 'stateResponse':
+        // Response to getState query
+        this.injectedState = { ...this.injectedState, ...data.state };
+        this.emit('stateResponse', data.state);
+        break;
+
+      case 'event':
+        // Custom events from process.reflexive.emit()
+        this._log('inject:event', `Event: ${data.event} - ${JSON.stringify(data.data)}`);
+        this.emit('injectedEvent', data);
+        break;
+
+      case 'span':
+        // Tracing spans from process.reflexive.span()
+        if (data.phase === 'start') {
+          this._log('inject:span', `▶ Span start: ${data.name}`);
+        } else {
+          const status = data.error ? `✗ error: ${data.error}` : '✓';
+          this._log('inject:span', `◀ Span end: ${data.name} (${data.duration}ms) ${status}`);
+        }
+        this.emit('injectedSpan', data);
+        break;
+
+      case 'diagnostic':
+        // diagnostics_channel messages
+        this._log('inject:diagnostic', `[${data.channel}] ${JSON.stringify(data.request || data)}`);
+        this.emit('injectedDiagnostic', data);
+        break;
+
+      case 'perf':
+        // perf_hooks data (GC, event loop)
+        if (data.type === 'gc') {
+          this._log('inject:perf', `GC: kind=${data.kind}, duration=${data.duration?.toFixed(2)}ms`);
+        } else if (data.type === 'eventLoop') {
+          this._log('inject:perf', `Event Loop: mean=${data.mean?.toFixed(2)}ms, p99=${data.p99?.toFixed(2)}ms`);
+        }
+        this.emit('injectedPerf', data);
+        break;
+
+      case 'evalResponse':
+        // Response from eval request
+        const callback = this.evalCallbacks.get(data.id);
+        if (callback) {
+          this.evalCallbacks.delete(data.id);
+          if (data.success) {
+            callback.resolve(data.result);
+          } else {
+            callback.reject(new Error(data.error));
+          }
+        }
+        if (data.success) {
+          this._log('inject:eval', `Eval result: ${JSON.stringify(data.result).slice(0, 200)}`);
+        } else {
+          this._log('inject:eval', `Eval error: ${data.error}`);
+        }
+        this.emit('evalResponse', data);
+        break;
+
+      case 'globalsResponse':
+        this._log('inject:globals', `Globals: ${data.globals.slice(0, 20).join(', ')}...`);
+        this.emit('globalsResponse', data);
+        break;
+
+      default:
+        this._log('inject:unknown', `Unknown message type: ${type}`);
+    }
+  }
+
+  evaluate(code, timeout = 10000) {
+    return new Promise((resolve, reject) => {
+      if (!this.inject || !this.options.eval) {
+        reject(new Error('Eval not enabled. Run with --eval flag.'));
+        return;
+      }
+      if (!this.child || !this.injectionReady) {
+        reject(new Error('Process not ready for eval.'));
+        return;
+      }
+
+      const id = ++this.evalIdCounter;
+      const timeoutHandle = setTimeout(() => {
+        this.evalCallbacks.delete(id);
+        reject(new Error('Eval timed out'));
+      }, timeout);
+
+      this.evalCallbacks.set(id, {
+        resolve: (result) => {
+          clearTimeout(timeoutHandle);
+          resolve(result);
+        },
+        reject: (error) => {
+          clearTimeout(timeoutHandle);
+          reject(error);
+        }
+      });
+
+      try {
+        this.child.send({ reflexive: true, type: 'eval', id, code });
+      } catch (e) {
+        this.evalCallbacks.delete(id);
+        clearTimeout(timeoutHandle);
+        reject(new Error(`Failed to send eval: ${e.message}`));
+      }
+    });
+  }
+
+  queryInjectedState() {
+    // Request current state from injected child process
+    if (this.inject && this.child && this.injectionReady) {
+      try {
+        this.child.send({ reflexive: true, type: 'getState' });
+      } catch (e) {
+        // Child may have disconnected
+      }
+    }
+  }
+
+  getInjectedState() {
+    return { ...this.injectedState };
   }
 
   _handleInteractiveOutput(text, source) {
@@ -1466,7 +1656,10 @@ class ProcessManager {
       entry: this.entry,
       cwd: this.cwd,
       interactive: this.interactive,
-      waitingForInput: this.waitingForInput
+      waitingForInput: this.waitingForInput,
+      inject: this.inject,
+      injectionReady: this.injectionReady,
+      injectedState: this.inject ? this.injectedState : undefined
     };
   }
 
@@ -1619,6 +1812,172 @@ function createCliMcpServer(processManager, options) {
             }]
           };
         }
+      ),
+
+      tool(
+        'get_injected_state',
+        'Get state from the injected process (only available with --inject flag). Returns custom state set via process.reflexive.setState()',
+        {},
+        async () => {
+          if (!processManager.inject) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not enabled. Run with --inject flag to enable deep instrumentation.'
+              }]
+            };
+          }
+          if (!processManager.injectionReady) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not ready yet. The process may still be starting up.'
+              }]
+            };
+          }
+          // Query for latest state
+          processManager.queryInjectedState();
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                injectionReady: processManager.injectionReady,
+                state: processManager.getInjectedState()
+              }, null, 2)
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'get_injection_logs',
+        'Get logs specifically from the injection module (console intercepts, errors, performance, diagnostics)',
+        {
+          count: z.number().optional().describe('Number of log entries (default 50)'),
+          category: z.enum(['all', 'log', 'error', 'state', 'span', 'perf', 'diagnostic', 'event']).optional()
+            .describe('Filter by injection log category')
+        },
+        async ({ count, category }) => {
+          if (!processManager.inject) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not enabled. Run with --inject flag.'
+              }]
+            };
+          }
+          let logs = processManager.getLogs(count || 50);
+          // Filter to only injection logs
+          logs = logs.filter(l => l.type.startsWith('inject:'));
+          if (category && category !== 'all') {
+            logs = logs.filter(l => l.type === `inject:${category}`);
+          }
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify(logs, null, 2)
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'evaluate_in_app',
+        'Execute JavaScript code inside the running application. DANGEROUS: Only available with --eval flag. Can inspect variables, call functions, or modify behavior at runtime.',
+        {
+          code: z.string().describe('JavaScript code to evaluate in the app context'),
+          timeout: z.number().optional().describe('Timeout in milliseconds (default 10000)')
+        },
+        async ({ code, timeout }) => {
+          if (!options.eval) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Eval not enabled. Run with --eval flag to enable runtime code evaluation.\n\nWARNING: --eval allows arbitrary code execution in the target app.'
+              }]
+            };
+          }
+          if (!processManager.injectionReady) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not ready. The process may still be starting.'
+              }]
+            };
+          }
+
+          try {
+            const result = await processManager.evaluate(code, timeout || 10000);
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(result, null, 2)
+              }]
+            };
+          } catch (err) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Eval error: ${err.message}`
+              }]
+            };
+          }
+        }
+      ),
+
+      tool(
+        'list_app_globals',
+        'List global variables available in the app context. Useful for discovering what can be inspected.',
+        {},
+        async () => {
+          if (!options.eval) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Eval not enabled. Run with --eval flag.'
+              }]
+            };
+          }
+          if (!processManager.injectionReady) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not ready.'
+              }]
+            };
+          }
+
+          try {
+            // Get common useful globals
+            const result = await processManager.evaluate(`
+              const globals = {};
+              // Check for common app-level vars
+              ['app', 'server', 'db', 'config', 'router', 'express', 'http', 'https', 'fs', 'path'].forEach(name => {
+                if (typeof global[name] !== 'undefined') globals[name] = typeof global[name];
+              });
+              // Add any other non-internal globals
+              Object.keys(global).forEach(k => {
+                if (!k.startsWith('_') && !['global', 'process', 'console', 'Buffer', 'setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval', 'clearImmediate', 'queueMicrotask', 'performance', 'fetch'].includes(k)) {
+                  globals[k] = typeof global[k];
+                }
+              });
+              globals;
+            `);
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify(result, null, 2)
+              }]
+            };
+          } catch (err) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Error: ${err.message}`
+              }]
+            };
+          }
+        }
       )
     ]
   });
@@ -1679,6 +2038,7 @@ You are an AI assistant monitoring and controlling a Node.js process from the ou
 - Uptime: ${state.uptime}s
 - Restarts: ${state.restartCount}
 ${options.interactive ? `- Mode: INTERACTIVE (stdin/stdout proxied)` : ''}
+${options.inject ? `- Mode: INJECTED (deep instrumentation active)` : ''}
 ${state.waitingForInput ? `- ⚠️ CLI IS WAITING FOR INPUT` : ''}
 
 ## Your Capabilities
@@ -1686,6 +2046,7 @@ ${state.waitingForInput ? `- ⚠️ CLI IS WAITING FOR INPUT` : ''}
 - Write files: ${options.capabilities.writeFiles ? 'YES' : 'NO'}
 - Shell access: ${options.capabilities.shellAccess ? 'YES' : 'NO'}
 - Restart process: ${options.capabilities.restart ? 'YES' : 'NO'}
+- Injection: ${options.inject ? 'ENABLED' : 'NO'}
 ${interactiveSection}
 ## CLI-Specific Tools
 In addition to file tools, you have:
@@ -1695,6 +2056,10 @@ In addition to file tools, you have:
 - \`restart_process\` - Restart the process
 - \`stop_process\` / \`start_process\` - Control process lifecycle
 - \`send_input\` - Send text to the process stdin${options.interactive ? ' (USE THIS to respond to the CLI)' : ''}
+${options.inject ? `- \`get_injected_state\` - Get custom state from process.reflexive.setState()
+- \`get_injection_logs\` - Get logs from injection module (console, errors, perf, spans)` : ''}
+${options.eval ? `- \`evaluate_in_app\` - Execute JavaScript in the app (inspect vars, call functions, modify behavior)
+- \`list_app_globals\` - List available global variables in the app` : ''}
 
 ## Guidelines
 1. Use get_output_logs to see what the process is doing
@@ -1717,6 +2082,8 @@ function parseArgs(args) {
     open: false,
     watch: false,
     interactive: false,
+    inject: false,
+    eval: false,
     capabilities: {
       readFiles: true,
       writeFiles: false,
@@ -1742,6 +2109,11 @@ function parseArgs(args) {
       options.watch = true;
     } else if (arg === '--interactive' || arg === '-i') {
       options.interactive = true;
+    } else if (arg === '--inject') {
+      options.inject = true;
+    } else if (arg === '--eval') {
+      options.eval = true;
+      options.inject = true; // --eval implies --inject
     } else if (arg === '--capabilities' || arg === '-c') {
       const caps = args[++i].split(',');
       for (const cap of caps) {
@@ -1787,6 +2159,8 @@ OPTIONS:
   -o, --open              Open dashboard in browser
   -w, --watch             Restart on file changes
   -i, --interactive       Interactive mode: proxy stdin/stdout through agent
+      --inject            Inject deep instrumentation (console, diagnostics, perf)
+      --eval              Enable runtime code evaluation (DANGEROUS, implies --inject)
   -c, --capabilities      Enable capabilities (comma-separated)
       --write             Enable file writing
       --shell             Enable shell access

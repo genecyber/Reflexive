@@ -89,6 +89,8 @@ OPTIONS:
   -o, --open              Open dashboard in browser
   -w, --watch             Restart on file changes
   -i, --interactive       Interactive mode for CLI chat apps
+      --inject            Enable deep instrumentation via injection
+      --eval              Enable runtime code evaluation (DANGEROUS, implies --inject)
       --write             Enable file writing
       --shell             Enable shell access
       --node-args <args>  Arguments to pass to Node.js
@@ -120,6 +122,128 @@ When "Let agent handle CLI responses" is checked:
 3. Automatically formulates and sends a response via `send_input`
 
 This enables **AI-to-AI conversations** where Reflexive's agent talks to your interactive CLI.
+
+### Injection Mode
+
+For **deep instrumentation** without modifying your app code, use the `--inject` flag:
+
+```bash
+# Run with deep instrumentation
+reflexive --inject ./app.js
+
+# Combines with other flags
+reflexive --inject --watch --write ./server.js
+```
+
+Injection mode:
+- **Injects via `--require`** - no code changes needed in your app
+- **Intercepts console methods** - structured capture of log/info/warn/error/debug
+- **Captures uncaught exceptions** - with full stack traces
+- **Tracks custom state** - via `process.reflexive.setState()`
+- **Performance metrics** - GC stats, event loop utilization
+- **Diagnostics channels** - HTTP client/server request tracking
+- **Tracing spans** - via `process.reflexive.span()`
+
+**Your app can optionally use the injected API:**
+```javascript
+// No import needed - reflexive/inject provides this globally
+if (process.reflexive) {
+  // Set custom state the agent can query
+  process.reflexive.setState('users.active', 42);
+  process.reflexive.setState('cache.hitRate', 0.95);
+
+  // Emit custom events
+  process.reflexive.emit('userSignup', { userId: 123 });
+
+  // Trace operations
+  await process.reflexive.span('fetchData', async () => {
+    return await fetch('/api/data');
+  });
+}
+```
+
+**Injection MCP Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `get_injected_state` | Get custom state from `process.reflexive.setState()` |
+| `get_injection_logs` | Get logs from injection module (console, errors, perf, spans) |
+| `evaluate_in_app` | Execute JavaScript in the app context (requires `--eval`) |
+| `list_app_globals` | List global variables available in the app (requires `--eval`) |
+
+**What gets captured automatically (no code changes):**
+
+| Category | What's Captured |
+|----------|-----------------|
+| Console | All `console.log/info/warn/error/debug` with level metadata |
+| Errors | Uncaught exceptions and unhandled rejections with stack traces |
+| HTTP Server | Incoming requests via `diagnostics_channel` (method, url) |
+| HTTP Client | Outgoing requests via `diagnostics_channel` (method, host, path) |
+| GC | Garbage collection events with duration and type |
+| Event Loop | Latency histogram (min, max, mean, p50, p99) every 10s |
+
+**Try the injection demo:**
+
+```bash
+# Run the demo app with injection
+reflexive --inject demo-inject.js
+
+# In another terminal, make requests
+curl http://localhost:4567/test
+curl http://localhost:4567/api/users
+```
+
+Then in the dashboard chat:
+- "Show me the injection logs"
+- "What HTTP requests have been made?"
+- "What's the event loop latency?"
+- "Show me any errors"
+
+### Runtime Eval Mode
+
+For **live debugging and runtime modification**, add the `--eval` flag:
+
+```bash
+# DANGEROUS: Enables arbitrary code execution in the app
+reflexive --eval ./app.js
+```
+
+This allows the agent to:
+- **Inspect any variable** - `evaluate_in_app({ code: "users.get(123)" })`
+- **Call internal functions** - `evaluate_in_app({ code: "cache.clear()" })`
+- **Modify behavior** - Wrap functions, change config at runtime
+- **Hot-patch code** - Fix bugs without restarting
+
+**Example chat interactions:**
+
+```
+You: "What's in the config object?"
+Agent: [evaluate_in_app: code="config"]
+       { port: 3000, dbUrl: "postgres://...", debug: true }
+
+You: "How many active connections?"
+Agent: [evaluate_in_app: code="db.pool.totalCount"]
+       47
+
+You: "Wrap the query function to log slow queries"
+Agent: [evaluate_in_app: code="
+  const original = db.query.bind(db);
+  db.query = async (sql, params) => {
+    const start = Date.now();
+    const result = await original(sql, params);
+    if (Date.now() - start > 100) console.warn('Slow query:', sql);
+    return result;
+  };
+  'Query function wrapped'
+"]
+       "Query function wrapped"
+
+You: "Clear the user cache"
+Agent: [evaluate_in_app: code="userCache.clear(); 'Cache cleared'"]
+       "Cache cleared"
+```
+
+**Security warning:** `--eval` allows arbitrary code execution. Only use in development.
 
 ### CLI Agent Capabilities
 
@@ -376,19 +500,9 @@ const r = makeReflexive({
     Write and shell access disabled. Use --production=allow to override.
 ```
 
-### Auto-Injection Mode (Hybrid CLI + Library)
+### Auto-Injection Architecture
 
-The CLI currently monitors apps externally (stdout/stderr). With auto-injection, it injects deep instrumentation into the child process:
-
-```bash
-# TODO: Not yet implemented
-reflexive app.js --inject  # Default in future versions
-
-# Internally runs:
-# node --require reflexive/inject app.js
-```
-
-This gives you **both** external control AND internal instrumentation:
+The `--inject` flag (implemented) gives you **both** external control AND internal instrumentation:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -403,7 +517,6 @@ This gives you **both** external control AND internal instrumentation:
 │  │  - Console interception (log/warn/error)          │  │
 │  │  - diagnostics_channel (http/net/fs)              │  │
 │  │  - perf_hooks (GC, event loop)                    │  │
-│  │  - Inspector integration (breakpoints)            │  │
 │  │  - process.reflexive.setState() API               │  │
 │  └───────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
@@ -413,24 +526,17 @@ This gives you **both** external control AND internal instrumentation:
 
 | Feature | External Only | With Injection |
 |---------|---------------|----------------|
-| stdout/stderr | ✅ | ✅ |
-| File operations | ✅ | ✅ |
-| Process control | ✅ | ✅ |
-| Console.log capture | ❌ (just stdout) | ✅ (structured) |
-| HTTP request details | ❌ | ✅ (headers, body, timing) |
-| Database queries | ❌ | ✅ (query, params, duration) |
-| Custom app state | ❌ | ✅ (via process.reflexive) |
-| Event loop metrics | ❌ | ✅ |
-| Breakpoints | ❌ | ✅ |
+| stdout/stderr | Yes | Yes |
+| File operations | Yes | Yes |
+| Process control | Yes | Yes |
+| Console.log capture | No (just stdout) | Yes (structured) |
+| HTTP request details | No | Yes (via diagnostics_channel) |
+| Custom app state | No | Yes (via process.reflexive) |
+| Event loop metrics | No | Yes |
+| GC statistics | No | Yes |
+| Tracing spans | No | Yes |
 
-**App can expose state without importing reflexive:**
-```javascript
-// In your app - no import needed, reflexive/inject provides this
-process.reflexive?.setState('users.active', 42);
-process.reflexive?.setState('cache.hitRate', 0.95);
-```
-
-### OpenTelemetry Integration
+### OpenTelemetry Integration (TODO)
 
 Full integration with OpenTelemetry for zero-code auto-instrumentation:
 

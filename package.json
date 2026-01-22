@@ -8,11 +8,14 @@
     "reflexive": "./src/reflexive.js"
   },
   "exports": {
-    ".": "./src/reflexive.js"
+    ".": "./src/reflexive.js",
+    "./inject": "./src/inject.cjs"
   },
   "scripts": {
     "demo": "node demo-instrumented.js",
-    "demo:app": "node src/reflexive.js demo-app.js"
+    "demo:app": "node src/reflexive.js demo-app.js",
+    "demo:inject": "node src/reflexive.js --inject demo-inject.js",
+    "demo:eval": "node src/reflexive.js --eval demo-inject.js"
   },
   "keywords": [
     "ai",
