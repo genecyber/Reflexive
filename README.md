@@ -267,6 +267,19 @@ The agent running via CLI can:
 | `start_process` | Start the process if stopped |
 | `send_input` | Send text to process stdin |
 
+### Dashboard UI
+
+The web dashboard at `http://localhost:3099` provides:
+
+- **Real-time chat** with the AI agent
+- **Live logs** panel showing stdout/stderr with ANSI color support
+- **Process controls** (stop/restart buttons)
+- **Styled tool calls** - when the agent uses tools, they appear as styled badges:
+  - ⚡ icon with tool name in blue
+  - Parameters shown in gray monospace
+  - `send_input` commands get a green theme
+- **Interactive mode UI** - toggle between "Ask Agent" and "Direct to CLI" input modes
+
 ## Library Mode
 
 Embed the agent inside your own application:

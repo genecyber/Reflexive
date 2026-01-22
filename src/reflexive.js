@@ -258,6 +258,41 @@ function getDashboardHTML(options = {}) {
     .bubble h3 { font-size: 0.9rem; }
     .message-meta { font-size: 0.65rem; color: #555; margin-bottom: 3px; }
 
+    .tool-call {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin: 8px 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+      font-size: 0.85rem;
+    }
+    .tool-call .tool-icon {
+      font-size: 1rem;
+    }
+    .tool-call .tool-name {
+      color: #60a5fa;
+      font-weight: 600;
+    }
+    .tool-call .tool-params {
+      color: #94a3b8;
+      font-size: 0.8rem;
+      max-width: 350px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tool-call.send-input {
+      background: linear-gradient(135deg, #1e3a2f 0%, #0f291a 100%);
+      border-color: #22543d;
+    }
+    .tool-call.send-input .tool-name {
+      color: #4ade80;
+    }
+
     .chat-input-area { padding: 12px; border-top: 1px solid #222; }
     .chat-input-wrapper { display: flex; gap: 8px; }
     .chat-input {
@@ -653,8 +688,9 @@ function getDashboardHTML(options = {}) {
                   const inputs = Object.entries(data.input || {})
                     .map(([k, v]) => k + ': ' + JSON.stringify(v))
                     .join(', ');
-                  const toolStr = inputs ? '[' + toolName + ': ' + inputs + ']' : '[' + toolName + ']';
-                  fullText += '\\n\\n' + toolStr + '\\n\\n';
+                  // Create HTML tool call badge
+                  const toolHtml = '<div class="tool-call"><span class="tool-icon">⚡</span><span class="tool-name">' + toolName + '</span>' + (inputs ? '<span class="tool-params">' + escapeHtml(inputs) + '</span>' : '') + '</div>';
+                  fullText += '\\n\\n' + toolHtml + '\\n\\n';
                   updateBubbleContent(bubble, fullText);
                   messagesEl.scrollTop = messagesEl.scrollHeight;
                 } else if (data.type === 'error') {
@@ -823,12 +859,13 @@ function getDashboardHTML(options = {}) {
                 } else if (data.type === 'tool') {
                   const toolName = data.name.replace(/^mcp__[^_]+__/, '');
                   if (toolName === 'send_input') {
-                    fullText += '\\n\\n→ Sent to CLI: ' + (data.input?.input || '') + '\\n\\n';
+                    fullText += '\\n\\n<div class="tool-call send-input"><span class="tool-icon">→</span><span class="tool-name">Sent to CLI</span><span class="tool-params">' + escapeHtml(data.input?.input || '') + '</span></div>\\n\\n';
                   } else {
                     const inputs = Object.entries(data.input || {})
                       .map(([k, v]) => k + ': ' + JSON.stringify(v))
                       .join(', ');
-                    fullText += '\\n\\n[' + toolName + ': ' + inputs + ']\\n\\n';
+                    const toolHtml = '<div class="tool-call"><span class="tool-icon">⚡</span><span class="tool-name">' + toolName + '</span>' + (inputs ? '<span class="tool-params">' + escapeHtml(inputs) + '</span>' : '') + '</div>';
+                    fullText += '\\n\\n' + toolHtml + '\\n\\n';
                   }
                   updateBubbleContent(bubble, fullText);
                   messagesEl.scrollTop = messagesEl.scrollHeight;

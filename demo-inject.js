@@ -136,6 +136,7 @@ if (process.reflexive) {
 
   process.reflexive.setState('app.name', 'demo-inject');
   process.reflexive.setState('app.version', '1.0.0');
+  process.reflexive.setState('user', { name: 'Alice', age: 30, email: 'alice@example.com' });
 
   // Update request count
   let requestCount = 0;
