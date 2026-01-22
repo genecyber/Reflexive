@@ -294,6 +294,54 @@ const r = makeReflexive({ transport: 'websocket' });
 // Events propagate across processes
 ```
 
+### Production Safety (NODE_ENV Detection)
+
+Prevent accidentally running Reflexive in production:
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  production: 'fail'  // 'fail' | 'warn' | 'disable' | 'allow'
+});
+```
+
+| Mode | NODE_ENV=production behavior |
+|------|------------------------------|
+| `'fail'` | Throw error, refuse to start (default for `--write`, `--shell`) |
+| `'warn'` | Log warning, continue with limited capabilities |
+| `'disable'` | Silently no-op, app runs normally without Reflexive |
+| `'allow'` | Run anyway (explicit opt-in for production debugging) |
+
+```bash
+# CLI flags
+reflexive app.js --production=fail    # Error if NODE_ENV=production
+reflexive app.js --production=warn    # Warn but continue
+reflexive app.js --production=disable # No-op in production
+reflexive app.js --production=allow   # Explicit production use
+
+# Or via environment
+REFLEXIVE_PRODUCTION=fail node app.js
+```
+
+**Capability restrictions by environment:**
+
+```javascript
+// TODO: Not yet implemented
+const r = makeReflexive({
+  capabilities: {
+    development: { write: true, shell: true, inject: true, breakpoints: true },
+    staging: { write: false, shell: false, inject: true, breakpoints: true },
+    production: { write: false, shell: false, inject: false, breakpoints: false }
+  }
+});
+```
+
+**Warning banner in dashboard:**
+```
+⚠️  PRODUCTION MODE - Reflexive is running in production (NODE_ENV=production)
+    Write and shell access disabled. Use --production=allow to override.
+```
+
 ### Auto-Injection Mode (Hybrid CLI + Library)
 
 The CLI currently monitors apps externally (stdout/stderr). With auto-injection, it injects deep instrumentation into the child process:
