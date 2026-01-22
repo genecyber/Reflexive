@@ -680,6 +680,45 @@ Since the Claude Agent SDK only has native implementations for **Node.js** and *
    r.SetState("connections", 42)
    ```
 
+### 1Code Desktop Interface
+
+Optional integration with [1Code](https://github.com/21st-dev/1code) for a richer desktop UI:
+
+```bash
+# TODO: Not yet implemented
+reflexive app.js --ui=1code
+```
+
+**What 1Code provides:**
+- **Cursor-like interface** with visual diff previews
+- **Git worktree isolation** - each chat session in isolated branch
+- **Plan mode** - see structured plans before execution
+- **Integrated terminal** and project management
+- **Local + remote** agent execution
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  1Code Desktop                                          │
+│  ┌─────────────────┬───────────────────────────────┐   │
+│  │ Project Files   │  Chat with Reflexive Agent    │   │
+│  │ ├── src/        │  ┌─────────────────────────┐  │   │
+│  │ │   └── app.js  │  │ You: Fix the memory leak│  │   │
+│  │ ├── package.json│  │                         │  │   │
+│  │ └── ...         │  │ Agent: I found the issue│  │   │
+│  │                 │  │ [diff preview]          │  │   │
+│  │ Process Logs    │  │ ┌─────────────────────┐ │  │   │
+│  │ > Server started│  │ │- const data = []    │ │  │   │
+│  │ > Request: GET /│  │ │+ const data = new   │ │  │   │
+│  │ > 200 OK (45ms) │  │ │+   WeakMap()        │ │  │   │
+│  │                 │  │ └─────────────────────┘ │  │   │
+│  └─────────────────┴───────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Integration points:**
+- Reflexive provides: process introspection, logs, state, MCP tools
+- 1Code provides: desktop UI, diff viewer, git integration, plan mode
+
 ---
 
 ## License
