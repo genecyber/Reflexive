@@ -258,6 +258,35 @@ function getDashboardHTML(options = {}) {
     .bubble h3 { font-size: 0.9rem; }
     .message-meta { font-size: 0.65rem; color: #555; margin-bottom: 3px; }
 
+    .tool-call {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 10px;
+      margin: 4px 0;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.8rem;
+    }
+    .tool-call-icon {
+      color: #22c55e;
+      font-size: 0.9rem;
+    }
+    .tool-call-name {
+      color: #60a5fa;
+      font-weight: 600;
+    }
+    .tool-call-params {
+      color: #94a3b8;
+      font-size: 0.75rem;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .chat-input-area { padding: 12px; border-top: 1px solid #222; }
     .chat-input-wrapper { display: flex; gap: 8px; }
     .chat-input {
@@ -554,7 +583,16 @@ function getDashboardHTML(options = {}) {
 
     function renderMarkdown(text) {
       const rawHtml = marked.parse(text);
-      return DOMPurify.sanitize(rawHtml);
+      const sanitized = DOMPurify.sanitize(rawHtml);
+      // Convert tool call patterns [tool_name] or [tool_name: params] to styled spans
+      const toolCallRegex = /\[([a-z_]+)(?::\s*([^\]]+))?\]/gi;
+      return sanitized.replace(toolCallRegex, (match, toolName, params) => {
+        const icon = '⚡';
+        const paramsHtml = params
+          ? '<span class="tool-call-params">' + params.trim() + '</span>'
+          : '';
+        return '<span class="tool-call"><span class="tool-call-icon">' + icon + '</span><span class="tool-call-name">' + toolName + '</span>' + paramsHtml + '</span>';
+      });
     }
 
     function addUserMessage(text) {
