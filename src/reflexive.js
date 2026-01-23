@@ -1157,9 +1157,13 @@ function getDashboardHTML(options = {}) {
       border-radius: 4px;
       font-size: 0.65rem;
       background: #1a1a22;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
     }
+    .perm-item:hover { background: #252530; }
     .perm-item.enabled { color: #4ade80; }
-    .perm-item.disabled { color: #666; }
+    .perm-item.disabled { color: #666; opacity: 0.7; }
+    .perm-item.disabled:hover { opacity: 1; }
     .perm-icon {
       font-size: 0.7rem;
       width: 14px;
@@ -1412,32 +1416,32 @@ function getDashboardHTML(options = {}) {
               <span>Permissions</span>
             </div>
             <div class="debug-content" id="permissions-content">
-              <div class="permissions-grid">
-                <div class="perm-item ${capabilities.readFiles ? 'enabled' : 'disabled'}">
+              <div class="permissions-grid" id="permissions-grid">
+                <div class="perm-item ${capabilities.readFiles ? 'enabled' : 'disabled'}" data-perm="readFiles">
                   <span class="perm-icon">${capabilities.readFiles ? '✓' : '✗'}</span>
                   <span class="perm-label">Read Files</span>
                 </div>
-                <div class="perm-item ${capabilities.writeFiles ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${capabilities.writeFiles ? 'enabled' : 'disabled'}" data-perm="writeFiles">
                   <span class="perm-icon">${capabilities.writeFiles ? '✓' : '✗'}</span>
                   <span class="perm-label">Write Files</span>
                 </div>
-                <div class="perm-item ${capabilities.shellAccess ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${capabilities.shellAccess ? 'enabled' : 'disabled'}" data-perm="shellAccess">
                   <span class="perm-icon">${capabilities.shellAccess ? '✓' : '✗'}</span>
                   <span class="perm-label">Shell Access</span>
                 </div>
-                <div class="perm-item ${capabilities.restart ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${capabilities.restart ? 'enabled' : 'disabled'}" data-perm="restart">
                   <span class="perm-icon">${capabilities.restart ? '✓' : '✗'}</span>
                   <span class="perm-label">Restart Process</span>
                 </div>
-                <div class="perm-item ${capabilities.networkAccess ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${capabilities.networkAccess ? 'enabled' : 'disabled'}" data-perm="networkAccess">
                   <span class="perm-icon">${capabilities.networkAccess ? '✓' : '✗'}</span>
                   <span class="perm-label">Network Access</span>
                 </div>
-                <div class="perm-item ${inject ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${inject ? 'enabled' : 'disabled'}" data-perm="inject">
                   <span class="perm-icon">${inject ? '✓' : '✗'}</span>
                   <span class="perm-label">Injection</span>
                 </div>
-                <div class="perm-item ${debug ? 'enabled' : 'disabled'}">
+                <div class="perm-item ${debug ? 'enabled' : 'disabled'}" data-perm="debug">
                   <span class="perm-icon">${debug ? '✓' : '✗'}</span>
                   <span class="perm-label">V8 Debugging</span>
                 </div>
@@ -2065,6 +2069,35 @@ function getDashboardHTML(options = {}) {
         document.body.style.userSelect = '';
       }
     });
+
+    // Permissions toggle handler
+    const permissionsGrid = document.getElementById('permissions-grid');
+    if (permissionsGrid) {
+      permissionsGrid.addEventListener('click', async (e) => {
+        const item = e.target.closest('.perm-item');
+        if (!item) return;
+        const perm = item.dataset.perm;
+        if (!perm) return;
+
+        try {
+          const res = await fetch('/permissions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ permission: perm, toggle: true })
+          });
+          const result = await res.json();
+          if (result.success) {
+            // Update UI
+            const isEnabled = result.enabled;
+            item.classList.toggle('enabled', isEnabled);
+            item.classList.toggle('disabled', !isEnabled);
+            item.querySelector('.perm-icon').textContent = isEnabled ? '✓' : '✗';
+          }
+        } catch (e) {
+          console.error('Failed to toggle permission:', e);
+        }
+      });
+    }
     ` : ''}
 
     // Clear logs button
@@ -5652,6 +5685,50 @@ async function startCliDashboard(processManager, options) {
           processManager._log(type || 'dashboard', message);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+        return;
+      }
+
+      // Toggle permissions for current session
+      if (pathname === '/permissions' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        try {
+          const { permission, toggle } = JSON.parse(body);
+          // Map permission names to options keys
+          const permMap = {
+            readFiles: 'readFiles',
+            writeFiles: 'write',
+            shellAccess: 'shell',
+            restart: 'restart',
+            networkAccess: 'networkAccess',
+            inject: 'inject',
+            debug: 'debug'
+          };
+          const optKey = permMap[permission];
+          if (!optKey) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unknown permission' }));
+            return;
+          }
+          // Toggle the permission
+          if (toggle) {
+            options[optKey] = !options[optKey];
+            // Also update capabilities object for consistency
+            if (options.capabilities) {
+              if (permission === 'readFiles') options.capabilities.readFiles = options[optKey];
+              if (permission === 'writeFiles') options.capabilities.writeFiles = options[optKey];
+              if (permission === 'shellAccess') options.capabilities.shellAccess = options[optKey];
+              if (permission === 'restart') options.capabilities.restart = options[optKey];
+              if (permission === 'networkAccess') options.capabilities.networkAccess = options[optKey];
+            }
+          }
+          processManager._log('system', `Permission "${permission}" ${options[optKey] ? 'enabled' : 'disabled'}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, enabled: options[optKey] }));
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
