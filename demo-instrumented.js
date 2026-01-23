@@ -206,8 +206,47 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Task Queue API running at http://localhost:${PORT}`);
-  console.log(`Reflexive dashboard at http://localhost:3099/reflexive`);
+  console.log(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    REFLEXIVE LIBRARY MODE DEMO                                 ║
+║                      (Self-Instrumenting Task Queue)                           ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  Task Queue API:  http://localhost:${PORT}                                        ║
+║  Dashboard:       http://localhost:3099/reflexive                              ║
+║  PID: ${String(process.pid).padEnd(73)}║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  HOW TO USE THIS DEMO:                                                         ║
+║                                                                                ║
+║  1. Run directly:  npm run demo  (or: node demo-instrumented.js)               ║
+║  2. Open dashboard: http://localhost:3099/reflexive                            ║
+║  3. This demo shows LIBRARY MODE - embedding Reflexive in your app             ║
+║                                                                                ║
+║  KEY FEATURES DEMONSTRATED:                                                    ║
+║  • makeReflexive() - Initialize agent inside your app                          ║
+║  • reflexive.setState() - Expose custom metrics to the agent                   ║
+║  • Custom system prompt for app-specific context                               ║
+║  • Background task processing with random failures (20% chance)                ║
+║                                                                                ║
+║  API ENDPOINTS (use curl or browser):                                          ║
+║                                                                                ║
+║    GET  /              → API info                                              ║
+║    GET  /tasks         → List all tasks                                        ║
+║    POST /tasks         → Create task: curl -X POST -d '{"name":"Test"}' ...    ║
+║    POST /tasks/batch   → Create batch: curl -X POST -d '{"count":5}' ...       ║
+║    GET  /tasks/:id     → Get specific task                                     ║
+║    GET  /metrics       → Queue metrics and stats                               ║
+║                                                                                ║
+║  TRY ASKING THE AGENT:                                                         ║
+║    "How many tasks are pending?"                                               ║
+║    "What's the success rate?"                                                  ║
+║    "Show me failed tasks"                                                      ║
+║    "What are the current queue metrics?"                                       ║
+║                                                                                ║
+║  WATCH TRIGGER IDEAS:                                                          ║
+║    "failed" → "Investigate why this task failed and suggest a fix"             ║
+║    "heartbeat" → "Summarize current queue health"                              ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+`);
 
   // Create some initial tasks
   setTimeout(() => {

@@ -78,7 +78,57 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(4567, () => {
-  console.log('Server running on http://localhost:4567');
+  console.log(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║                    REFLEXIVE INJECTION MODE DEMO                               ║
+║                    (Deep Instrumentation via --inject)                         ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  Server:     http://localhost:4567                                             ║
+║  PID: ${String(process.pid).padEnd(73)}║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  HOW TO RUN THIS DEMO:                                                         ║
+║                                                                                ║
+║  Injection only (console capture, diagnostics):                                ║
+║    npm run demo:inject                                                         ║
+║    (or: node src/reflexive.js --inject demo-inject.js)                         ║
+║                                                                                ║
+║  With eval enabled (run code in app context):                                  ║
+║    npm run demo:eval                                                           ║
+║    (or: node src/reflexive.js --eval demo-inject.js)                           ║
+║                                                                                ║
+║  KEY FEATURES DEMONSTRATED:                                                    ║
+║  • Console interception (all log levels captured)                              ║
+║  • HTTP diagnostics via diagnostics_channel                                    ║
+║  • GC and event loop metrics via perf_hooks                                    ║
+║  • process.reflexive API for custom state                                      ║
+║  • Breakpoints (pause/resume execution)                                        ║
+║  • Remote eval (with --eval flag)                                              ║
+║                                                                                ║
+║  GLOBAL VARIABLES (for --eval testing):                                        ║
+║    config    → App configuration object                                        ║
+║    users     → Map of user data                                                ║
+║    cache     → Simple cache with get/set/clear                                 ║
+║    addUser() → Function to add new users                                       ║
+║    getStats()→ Function to get app statistics                                  ║
+║                                                                                ║
+║  TRY WITH --inject:                                                            ║
+║    "Show me the injection logs"                                                ║
+║    "What HTTP requests have been made?"                                        ║
+║    "Are there any GC events?"                                                  ║
+║                                                                                ║
+║  TRY WITH --eval:                                                              ║
+║    "What's in the config object?"                                              ║
+║    "How many users are there?"                                                 ║
+║    "Call addUser with name 'Alice'"                                            ║
+║    "Clear the cache"                                                           ║
+║    "What are the current stats?"                                               ║
+║                                                                                ║
+║  WATCH TRIGGER IDEAS:                                                          ║
+║    "External request failed" → "Investigate the HTTP error"                    ║
+║    "memory pressure" → "Analyze memory usage patterns"                         ║
+║    "event loop" → "Check for performance issues"                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+`);
 });
 
 // === HTTP Client requests (automatic tracking) ===
@@ -159,16 +209,4 @@ if (process.reflexive) {
   }, 5000);
 }
 
-console.log('Demo app ready!');
-console.log('');
-console.log('With --inject, try in the dashboard:');
-console.log('  - "Show me the injection logs"');
-console.log('  - "What HTTP requests have been made?"');
-console.log('');
-console.log('With --eval, also try:');
-console.log('  - "What\'s in the config object?"');
-console.log('  - "How many users are there?"');
-console.log('  - "Call addUser with name Alice"');
-console.log('  - "What are the current stats?"');
-console.log('');
-console.log('Make HTTP requests: curl http://localhost:4567/test');
+console.log('Demo app ready! Make HTTP requests: curl http://localhost:4567/test');

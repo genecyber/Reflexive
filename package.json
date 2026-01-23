@@ -16,6 +16,7 @@
     "demo:app": "node src/reflexive.js demo-app.js",
     "demo:inject": "node src/reflexive.js --inject demo-inject.js",
     "demo:eval": "node src/reflexive.js --eval demo-inject.js",
+    "demo:debug": "node src/reflexive.js --debug demo-app.js",
     "demo:ai": "node demo-ai-features.js",
     "demo:ai:inject": "node src/reflexive.js --inject demo-ai-features.js"
   },
@@ -36,6 +37,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "ws": "^8.19.0",
     "zod": "^3.24.1"
   },
   "engines": {
