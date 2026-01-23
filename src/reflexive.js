@@ -10,7 +10,7 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname, join } from 'path';
-import { existsSync, watch, realpathSync, readFileSync } from 'fs';
+import { existsSync, watch, realpathSync, readFileSync, writeFileSync } from 'fs';
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
@@ -542,21 +542,24 @@ function getDashboardHTML(options = {}) {
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #444; }
     * { scrollbar-width: thin; scrollbar-color: #333 #1a1a22; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 8px 12px; }
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 12px 0;
+      padding: 4px 0;
       border-bottom: 1px solid #222;
-      margin-bottom: 16px;
+      margin-bottom: 10px;
     }
     h1 { font-size: 1.1rem; color: #fff; display: flex; align-items: center; gap: 0; }
-    .logo-img { height: 42px; width: auto; margin-right: -6px; mix-blend-mode: darken; }
+    .logo-img { height: 90px; width: auto; margin-right: -26px; margin-top: -4px; margin-left: -16px; position: relative; z-index: 1; filter: drop-shadow(0 0 4px rgba(74, 222, 128, 0.2)); }
     .logo-text {
       font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 1.4rem;
+      font-size: 1.5rem;
       font-weight: 700;
+      position: relative;
+      z-index: 2;
+      margin-left: -12px;
       letter-spacing: 2px;
       background: linear-gradient(135deg, #4ade80 0%, #22c55e 50%, #16a34a 100%);
       -webkit-background-clip: text;
@@ -1349,7 +1352,7 @@ function getDashboardHTML(options = {}) {
     <header>
       <div>
         <h1>
-          <img src="/logo.jpg" alt="R" class="logo-img" />
+          <img src="/logo-carbon.png" alt="R" class="logo-img" />
           <span class="logo-text">EFLEXIVE</span>
         </h1>
         ${status.entry ? `<div class="entry">${status.entry}</div>` : ''}
@@ -3004,6 +3007,20 @@ ${systemPrompt}`;
 
     const url = new URL(req.url, `http://${req.headers.host}`);
     const pathname = url.pathname;
+
+    // Serve logo
+    if (pathname === '/logo-carbon.png' || pathname === '/reflexive/logo-carbon.png') {
+      const logoPath = join(__dirname, '..', 'logo-carbon.png');
+      try {
+        const logoData = readFileSync(logoPath);
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+        res.end(logoData);
+      } catch (e) {
+        res.writeHead(404);
+        res.end('Logo not found');
+      }
+      return;
+    }
 
     if (pathname === '/reflexive' || pathname === '/reflexive/') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -5492,6 +5509,7 @@ async function resolveEntryFromPackageJson(options) {
     scriptNames.forEach((name, i) => {
       console.log(`  ${i + 1}) ${name}: ${scripts[name]}`);
     });
+    console.log(`  ${scriptNames.length + 1}) [Enter a filename]`);
     console.log();
 
     const rl = createInterface({
@@ -5502,9 +5520,9 @@ async function resolveEntryFromPackageJson(options) {
     const answer = await new Promise(resolve => {
       rl.question('Select script number (or press Enter for "start"): ', resolve);
     });
-    rl.close();
 
     if (answer.trim() === '') {
+      rl.close();
       if (scripts.start) {
         selectedScript = 'start';
       } else {
@@ -5513,9 +5531,22 @@ async function resolveEntryFromPackageJson(options) {
       }
     } else {
       const idx = parseInt(answer, 10) - 1;
-      if (idx >= 0 && idx < scriptNames.length) {
+      if (idx === scriptNames.length) {
+        // User wants to enter a custom filename
+        const filename = await new Promise(resolve => {
+          rl.question('Enter filename: ', resolve);
+        });
+        rl.close();
+        if (filename.trim()) {
+          return filename.trim();
+        }
+        console.error('No filename entered.');
+        return null;
+      } else if (idx >= 0 && idx < scriptNames.length) {
+        rl.close();
         selectedScript = scriptNames[idx];
       } else {
+        rl.close();
         console.error('Invalid selection.');
         return null;
       }
@@ -5591,11 +5622,11 @@ async function startCliDashboard(processManager, options) {
 
     try {
       // Serve logo
-      if (pathname === '/logo.jpg') {
-        const logoPath = join(__dirname, '..', 'logo1.jpg');
+      if (pathname === '/logo-carbon.png') {
+        const logoPath = join(__dirname, '..', 'logo-carbon.png');
         try {
           const logoData = readFileSync(logoPath);
-          res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
           res.end(logoData);
         } catch (e) {
           res.writeHead(404);
@@ -6094,15 +6125,31 @@ async function main() {
       options.entry = resolved;
       options.open = true; // Auto-open dashboard when no explicit entry
     } else {
-      console.error('Error: No entry file specified and no package.json scripts found\n');
-      printHelp();
-      process.exit(1);
+      // No package.json or scripts found - prompt for filename
+      console.log('No entry file specified and no package.json scripts found.\n');
+      const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+      const filename = await new Promise(resolve => {
+        rl.question('Enter filename to run: ', resolve);
+      });
+      rl.close();
+      if (filename.trim()) {
+        options.entry = filename.trim();
+        options.open = true;
+      } else {
+        console.error('No filename entered.\n');
+        printHelp();
+        process.exit(1);
+      }
     }
   }
 
   if (!existsSync(options.entry)) {
-    console.error(`Error: Entry file not found: ${options.entry}\n`);
-    process.exit(1);
+    // Create the file if it doesn't exist
+    console.log(`Creating new file: ${options.entry}\n`);
+    writeFileSync(options.entry, '// Created by Reflexive\n\nconsole.log("Hello from Reflexive!");\n');
   }
 
   const processManager = new ProcessManager(options);
