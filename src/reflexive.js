@@ -527,7 +527,7 @@ function getDashboardHTML(options = {}) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
+  <title>Reflexive</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -551,7 +551,26 @@ function getDashboardHTML(options = {}) {
       border-bottom: 1px solid #222;
       margin-bottom: 16px;
     }
-    h1 { font-size: 1.1rem; color: #fff; display: flex; align-items: center; gap: 8px; }
+    h1 { font-size: 1.1rem; color: #fff; display: flex; align-items: center; gap: 0; }
+    .logo-img { height: 42px; width: auto; margin-right: -6px; mix-blend-mode: darken; }
+    .logo-text {
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      background: linear-gradient(135deg, #4ade80 0%, #22c55e 50%, #16a34a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: 0 0 30px rgba(74, 222, 128, 0.3);
+    }
+    .logo-text-dim {
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 300;
+      letter-spacing: 2px;
+      color: #666;
+    }
     .entry { font-size: 0.8rem; color: #666; font-family: monospace; }
     .controls { display: flex; gap: 8px; }
     .btn {
@@ -1329,7 +1348,10 @@ function getDashboardHTML(options = {}) {
   <div class="container">
     <header>
       <div>
-        <h1>${title}</h1>
+        <h1>
+          <img src="/logo.jpg" alt="R" class="logo-img" />
+          <span class="logo-text">EFLEXIVE</span>
+        </h1>
         ${status.entry ? `<div class="entry">${status.entry}</div>` : ''}
       </div>
       ${controlsHTML}
@@ -5568,6 +5590,20 @@ async function startCliDashboard(processManager, options) {
     const pathname = url.pathname;
 
     try {
+      // Serve logo
+      if (pathname === '/logo.jpg') {
+        const logoPath = join(__dirname, '..', 'logo1.jpg');
+        try {
+          const logoData = readFileSync(logoPath);
+          res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+          res.end(logoData);
+        } catch (e) {
+          res.writeHead(404);
+          res.end('Logo not found');
+        }
+        return;
+      }
+
       if (pathname === '/' || pathname === '/dashboard') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(getDashboardHTML({
