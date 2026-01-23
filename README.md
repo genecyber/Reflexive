@@ -56,6 +56,30 @@ export ANTHROPIC_API_KEY=your-api-key
 
 Using Claude Code CLI means you authenticate once and Reflexive uses those credentials automatically - no API key management needed.
 
+## Demos
+
+Try these demos to see Reflexive in action:
+
+```bash
+# Library mode - task queue with custom state tracking
+npm run demo
+
+# CLI mode - monitor a simple HTTP server
+npm run demo:app
+
+# Deep instrumentation - GC, event loop, console intercept
+npm run demo:inject
+
+# Runtime eval - inspect and modify running app
+npm run demo:eval
+
+# AI-powered features - poems, filters, breakpoints
+npm run demo:ai
+
+# AI features with breakpoints enabled
+npm run demo:ai:inject
+```
+
 ## CLI Mode
 
 Run **any** Node.js app with an AI agent that can see stdout/stderr, read source files, and control the process:
@@ -93,9 +117,12 @@ OPTIONS:
       --eval              Enable runtime code evaluation (DANGEROUS, implies --inject)
       --write             Enable file writing
       --shell             Enable shell access
+      --dangerously-skip-permissions  Enable ALL capabilities
       --node-args <args>  Arguments to pass to Node.js
       --help              Show help
 ```
+
+If no entry file is specified, Reflexive looks for `package.json` and lets you select a script to run.
 
 ### Interactive Mode
 
@@ -303,6 +330,7 @@ r.server                // HTTP server instance
 r.log(type, message)    // Manual log entry ('info', 'warn', 'error', 'debug')
 r.setState(key, value)  // Set custom state
 r.getState(key)         // Get custom state (or all if no key)
+r.chat(message)         // Programmatic AI chat (returns Promise<string>)
 ```
 
 ### Automatic Console Capture
@@ -369,6 +397,100 @@ const r = makeReflexive({
 });
 ```
 
+### Programmatic Chat API
+
+Chat with the agent directly from your code:
+
+```javascript
+const r = makeReflexive({ title: 'My App' });
+
+// Ask the agent a question
+const answer = await r.chat("What's the current memory usage?");
+console.log(answer);
+
+// Use AI to generate content
+const poem = await r.chat("Write a haiku about the current server uptime");
+```
+
+### AI-Powered Endpoints
+
+Use the `chat()` method to create AI-powered API endpoints:
+
+```javascript
+import http from 'http';
+import { makeReflexive } from 'reflexive';
+
+const r = makeReflexive({ title: 'AI API' });
+
+// Sample data
+const people = [
+  { id: 1, name: 'Alice', role: 'Engineer', skills: ['Go', 'K8s'] },
+  { id: 2, name: 'Bob', role: 'Designer', skills: ['Figma', 'CSS'] }
+];
+
+http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+
+  // AI-generated poems
+  if (url.pathname.startsWith('/poem/')) {
+    const topic = url.pathname.slice(6);
+    const poem = await r.chat(`Write a short poem about: ${topic}`);
+    res.end(JSON.stringify({ poem }));
+    return;
+  }
+
+  // Natural language filtering
+  if (url.pathname === '/filter') {
+    const query = url.searchParams.get('q');
+    const response = await r.chat(
+      `Given: ${JSON.stringify(people)}\n` +
+      `Filter for: "${query}"\n` +
+      `Return JSON: {"matchingIds": [...]}`
+    );
+    res.end(response);
+    return;
+  }
+}).listen(8080);
+```
+
+Try:
+- `GET /poem/coffee` → AI-generated poem about coffee
+- `GET /filter?q=engineers` → `{"matchingIds": [1]}`
+- `GET /filter?q=people who know CSS` → `{"matchingIds": [2]}`
+
+### Breakpoints
+
+Pause execution and let the AI inspect state (requires `--inject` flag):
+
+```javascript
+// In your app code:
+if (process.reflexive) {
+  // Pause execution with context
+  const result = await process.reflexive.breakpoint('before-payment', {
+    userId: user.id,
+    amount: order.total,
+    paymentMethod: payment.type
+  });
+
+  // Execution resumes when agent calls resume_breakpoint
+  // result contains any value passed by the agent
+}
+```
+
+From the dashboard, when a breakpoint is hit:
+1. Execution pauses and you see the breakpoint label, context, and stack trace
+2. Chat with the agent to inspect state, run evaluations
+3. Resume execution when ready
+
+MCP Tools for breakpoints:
+- `get_active_breakpoint` - Check if paused at a breakpoint
+- `resume_breakpoint` - Resume execution (optionally with a return value)
+
+Run with breakpoints:
+```bash
+npx reflexive --inject ./app.js
+```
+
 ### Dashboard Endpoints
 
 | Endpoint | Method | Description |
@@ -394,22 +516,16 @@ import {
 
 The following features are planned but not yet implemented:
 
-### Programmatic Chat API
-
-Chat with the agent directly from code (no HTTP):
+### Streaming Chat API
 
 ```javascript
-// TODO: Not yet implemented
-const response = await r.chat("What's causing the memory leak?");
-console.log(response);
-
-// Streaming
-for await (const chunk of r.chat("Analyze errors", { stream: true })) {
+// TODO: Not yet implemented - streaming version
+for await (const chunk of r.chatStream("Analyze errors")) {
   process.stdout.write(chunk);
 }
 ```
 
-Use cases: automated monitoring, Slack integration, scripted queries, testing.
+Note: Non-streaming `r.chat()` is implemented. Streaming version coming soon.
 
 ### State Exposure API
 

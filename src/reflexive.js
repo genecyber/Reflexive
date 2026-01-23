@@ -10,7 +10,8 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname } from 'path';
-import { existsSync, watch, realpathSync } from 'fs';
+import { existsSync, watch, realpathSync, readFileSync } from 'fs';
+import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
@@ -99,6 +100,7 @@ function getDashboardHTML(options = {}) {
     status = {},
     showControls = false,
     interactive = false,
+    inject = false,
     logsEndpoint = '/reflexive/logs',
     statusEndpoint = '/reflexive/status',
     chatEndpoint = '/reflexive/chat',
@@ -110,6 +112,7 @@ function getDashboardHTML(options = {}) {
         <button class="btn success" id="start-btn" ${status.isRunning ? 'disabled' : ''}>Start</button>
         <button class="btn" id="restart-btn">Restart</button>
         <button class="btn danger" id="stop-btn" ${!status.isRunning ? 'disabled' : ''}>Stop</button>
+        <button class="btn power" id="power-btn" title="Shutdown Reflexive">⏻</button>
       </div>` : '';
 
   const controlsScript = showControls ? `
@@ -124,6 +127,34 @@ function getDashboardHTML(options = {}) {
     document.getElementById('stop-btn').onclick = async () => {
       await fetch('/stop', { method: 'POST' });
       refresh();
+    };
+    document.getElementById('power-btn').onclick = async () => {
+      if (confirm('Shutdown Reflexive completely?')) {
+        // Show goodbye screen (static content, no user input)
+        document.body.innerHTML = \`
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;background:#0a0a0f;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;text-align:center;padding:20px;">
+            <div style="font-size:4rem;margin-bottom:20px;">&#x1F44B;</div>
+            <h1 style="font-size:2rem;margin-bottom:10px;color:#fff;">Thank you for using Reflexive</h1>
+            <p style="color:#888;margin-bottom:30px;">We hope you enjoyed building apps by talking to them.</p>
+            <div style="display:flex;gap:20px;flex-wrap:wrap;justify-content:center;">
+              <a href="https://github.com/genecyber/Reflexive" target="_blank" style="display:flex;align-items:center;gap:8px;padding:12px 24px;background:#222;border:1px solid #333;border-radius:8px;color:#fff;text-decoration:none;transition:all 0.2s;">
+                <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                Star on GitHub
+              </a>
+              <a href="https://x.com/reflexiveai" target="_blank" style="display:flex;align-items:center;gap:8px;padding:12px 24px;background:#222;border:1px solid #333;border-radius:8px;color:#fff;text-decoration:none;transition:all 0.2s;">
+                <svg height="18" width="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                Follow on X
+              </a>
+              <a href="https://discord.gg/reflexive" target="_blank" style="display:flex;align-items:center;gap:8px;padding:12px 24px;background:#222;border:1px solid #333;border-radius:8px;color:#fff;text-decoration:none;transition:all 0.2s;">
+                <svg height="20" width="20" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                Join Discord
+              </a>
+            </div>
+            <p style="margin-top:40px;color:#555;font-size:0.85rem;">Server has been shut down. You can close this tab.</p>
+          </div>
+        \`;
+        await fetch('/shutdown', { method: 'POST' });
+      }
     };` : '';
 
   const statusUpdateScript = showControls ? `
@@ -131,6 +162,42 @@ function getDashboardHTML(options = {}) {
         document.querySelector('.dot').className = 'dot ' + (state.isRunning ? 'running' : 'stopped');
         document.getElementById('start-btn').disabled = state.isRunning;
         document.getElementById('stop-btn').disabled = !state.isRunning;` : '';
+
+  const breakpointScript = showControls && inject ? `
+    const breakNowBtn = document.getElementById('break-now-btn');
+    const resumeBtn = document.getElementById('resume-btn');
+    let isAtBreakpoint = false;
+
+    breakNowBtn.onclick = async () => {
+      breakNowBtn.disabled = true;
+      await fetch('/break', { method: 'POST' });
+    };
+
+    resumeBtn.onclick = async () => {
+      await fetch('/resume', { method: 'POST' });
+    };
+
+    // Poll for breakpoint status
+    async function checkBreakpointStatus() {
+      try {
+        const res = await fetch('/breakpoint-status');
+        const data = await res.json();
+        if (data.paused && !isAtBreakpoint) {
+          isAtBreakpoint = true;
+          breakNowBtn.classList.add('paused');
+          breakNowBtn.disabled = true;
+          resumeBtn.disabled = false;
+        } else if (!data.paused && isAtBreakpoint) {
+          isAtBreakpoint = false;
+          breakNowBtn.classList.remove('paused');
+          breakNowBtn.disabled = false;
+          resumeBtn.disabled = true;
+        }
+      } catch (e) {}
+    }
+    setInterval(checkBreakpointStatus, 1000);
+    checkBreakpointStatus();
+  ` : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -146,6 +213,12 @@ function getDashboardHTML(options = {}) {
       color: #e0e0e0;
       min-height: 100vh;
     }
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1a1a22; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #444; }
+    * { scrollbar-width: thin; scrollbar-color: #333 #1a1a22; }
     .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
     header {
       display: flex;
@@ -173,6 +246,8 @@ function getDashboardHTML(options = {}) {
     .btn.danger:hover { background: #7f1d1d; }
     .btn.success { border-color: #22c55e; }
     .btn.success:hover { background: #14532d; }
+    .btn.power { border-color: #f59e0b; color: #f59e0b; font-size: 1rem; padding: 4px 10px; }
+    .btn.power:hover { background: #78350f; }
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -190,8 +265,8 @@ function getDashboardHTML(options = {}) {
     .dot.running { background: #22c55e; }
     .dot.stopped { background: #ef4444; }
 
-    .grid { display: grid; grid-template-columns: 1fr 350px; gap: 16px; height: calc(100vh - 100px); }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    .grid { display: flex; gap: 0; height: calc(100vh - 100px); }
+    @media (max-width: 900px) { .grid { flex-direction: column; } }
 
     .panel {
       background: #111118;
@@ -200,7 +275,41 @@ function getDashboardHTML(options = {}) {
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      min-width: 0;
     }
+    .panel:first-child { flex: 1; }
+    .panel:last-child { width: 380px; flex-shrink: 0; }
+    .panel.collapsed { width: 42px !important; min-width: 42px; }
+    .panel.collapsed .logs-wrapper { display: none; }
+    .panel.collapsed .metrics { display: none; }
+    .panel.collapsed .panel-header-actions { display: none; }
+    .panel.collapsed .panel-header { writing-mode: vertical-rl; text-orientation: mixed; padding: 14px 10px; border-bottom: none; justify-content: flex-start; }
+    .panel.collapsed .panel-header-toggle::before { transform: rotate(-90deg); }
+    .resize-handle:has(+ .panel.collapsed) { width: 0; overflow: hidden; }
+
+    .resize-handle {
+      width: 8px;
+      background: transparent;
+      cursor: col-resize;
+      flex-shrink: 0;
+      position: relative;
+      transition: background 0.15s;
+    }
+    .resize-handle:hover, .resize-handle.dragging { background: #333; }
+    .resize-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 4px;
+      height: 40px;
+      background: #444;
+      border-radius: 2px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .resize-handle:hover::after, .resize-handle.dragging::after { opacity: 1; }
     .panel-header {
       padding: 10px 14px;
       background: #16161d;
@@ -211,6 +320,24 @@ function getDashboardHTML(options = {}) {
       justify-content: space-between;
       align-items: center;
     }
+    .panel-header-actions { display: flex; gap: 6px; }
+    .panel-btn {
+      padding: 2px 8px;
+      background: transparent;
+      border: 1px solid #333;
+      border-radius: 4px;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: all 0.15s;
+    }
+    .panel-btn:hover { background: #222; color: #fff; border-color: #444; }
+    .panel-btn.active { background: #333; color: #fff; }
+    .panel-btn.breakpoint-btn { border-color: #f59e0b; color: #f59e0b; }
+    .panel-btn.breakpoint-btn:hover { background: #78350f; }
+    .panel-btn.breakpoint-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .panel-btn.breakpoint-btn.paused { background: #dc2626; border-color: #dc2626; color: #fff; animation: pulse-red 1.5s infinite; }
+    @keyframes pulse-red { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
     .status {
       display: flex;
       align-items: center;
@@ -316,6 +443,19 @@ function getDashboardHTML(options = {}) {
       font-weight: 500;
     }
     .chat-send:disabled { opacity: 0.5; }
+    .chat-stop {
+      padding: 10px 14px;
+      background: #ef4444;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 500;
+      display: none;
+    }
+    .chat-stop:hover { background: #dc2626; }
+    .chat-stop.visible { display: block; }
+    .chat-send.hidden { display: none; }
 
     .logs {
       flex: 1;
@@ -330,12 +470,65 @@ function getDashboardHTML(options = {}) {
       display: flex;
       gap: 8px;
     }
-    .log-type { width: 50px; flex-shrink: 0; color: #666; }
+    .log-type { width: 70px; flex-shrink: 0; color: #666; font-size: 0.65rem; }
     .log-entry.stdout .log-type, .log-entry.info .log-type { color: #22c55e; }
     .log-entry.stderr .log-type, .log-entry.error .log-type { color: #ef4444; }
     .log-entry.system .log-type, .log-entry.debug .log-type { color: #3b82f6; }
     .log-entry.warn .log-type { color: #eab308; }
     .log-message { color: #999; white-space: pre-wrap; word-break: break-all; }
+    .log-link { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+    .log-link:hover { color: #93c5fd; }
+
+    .log-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid #1a1a22; background: #0d0d12; }
+    .log-filter {
+      padding: 3px 8px;
+      font-size: 0.65rem;
+      border-radius: 10px;
+      border: 1px solid;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+    .log-filter.stdout { background: rgba(34, 197, 94, 0.15); border-color: #22c55e; color: #22c55e; }
+    .log-filter.stderr { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; color: #ef4444; }
+    .log-filter.system { background: rgba(59, 130, 246, 0.15); border-color: #3b82f6; color: #3b82f6; }
+    .log-filter.inject { background: rgba(168, 85, 247, 0.15); border-color: #a855f7; color: #a855f7; }
+    .log-filter.disabled { opacity: 0.3; background: transparent; }
+    .log-filter:hover { opacity: 0.8; }
+    .log-filter { position: relative; }
+    .log-filter[data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: calc(100% + 6px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1a1a22;
+      border: 1px solid #333;
+      color: #ccc;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.65rem;
+      white-space: nowrap;
+      z-index: 100;
+      pointer-events: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .log-filter[data-tooltip]:hover::before {
+      content: '';
+      position: absolute;
+      bottom: calc(100% + 2px);
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: #333;
+      z-index: 100;
+    }
+
+    .logs-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+    .panel-header-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+    .panel-header-toggle::before { content: '▼'; font-size: 0.6rem; transition: transform 0.2s; }
+    .panel.collapsed .panel-header-toggle::before { transform: rotate(-90deg); }
+    .panel.collapsed .panel-header { border-bottom: none; }
 
     .thinking { display: flex; gap: 4px; padding: 8px; }
     .thinking span {
@@ -482,6 +675,7 @@ function getDashboardHTML(options = {}) {
           <div class="chat-input-wrapper" id="agent-input-wrapper">
             <input class="chat-input" id="input" placeholder="${interactive ? 'Ask the agent about the CLI...' : 'Ask about your app...'}" />
             <button class="chat-send" id="send">Send</button>
+            <button class="chat-stop" id="stop-response" title="Stop response">■</button>
           </div>
           ${interactive ? `
           <div class="cli-input-area" id="cli-input-wrapper" style="display: none;">
@@ -498,9 +692,24 @@ function getDashboardHTML(options = {}) {
         </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-header">${showControls ? 'Process Output' : 'Application Logs'}</div>
-        <div class="logs" id="logs"></div>
+      <div class="resize-handle" id="resize-handle"></div>
+
+      <div class="panel ${interactive ? 'collapsed' : ''}" id="output-panel">
+        <div class="panel-header">
+          <span class="panel-header-toggle" id="logs-toggle">${showControls ? 'Process Output' : 'Application Logs'}</span>
+          <div class="panel-header-actions">
+            ${showControls && inject ? `
+            <button class="panel-btn breakpoint-btn" id="break-now-btn" title="Break now (pause execution)">⏸</button>
+            <button class="panel-btn breakpoint-btn" id="resume-btn" title="Resume execution" disabled>▶</button>
+            ` : ''}
+            <button class="panel-btn" id="clear-logs-btn" title="Clear logs">⌫</button>
+            <button class="panel-btn" id="pause-logs-btn" title="Pause auto-scroll">⏸</button>
+          </div>
+        </div>
+        <div class="logs-wrapper" id="logs-wrapper">
+          <div class="log-filters" id="log-filters"></div>
+          <div class="logs" id="logs"></div>
+        </div>
         <div class="metrics">
           <div class="metric">
             <span class="metric-label">PID:</span>
@@ -522,8 +731,122 @@ function getDashboardHTML(options = {}) {
     const messagesEl = document.getElementById('messages');
     const inputEl = document.getElementById('input');
     const sendBtn = document.getElementById('send');
+    const stopBtn = document.getElementById('stop-response');
     const logsEl = document.getElementById('logs');
+    const outputPanel = document.getElementById('output-panel');
+    const logsToggle = document.getElementById('logs-toggle');
+    const logFiltersEl = document.getElementById('log-filters');
+    const clearLogsBtn = document.getElementById('clear-logs-btn');
+    const pauseLogsBtn = document.getElementById('pause-logs-btn');
     let isLoading = false;
+    let isPaused = false;
+    let currentAbortController = null;
+
+    // Filter state - all enabled by default
+    const logFilters = { stdout: true, stderr: true, system: true };
+    const injectFilters = {}; // Dynamic inject namespaces
+    const injectColors = {}; // Color assignments for inject namespaces
+    let allLogs = [];
+
+    // Color palette for inject namespaces
+    const injectColorPalette = [
+      '#a855f7', // purple
+      '#f472b6', // pink
+      '#fb923c', // orange
+      '#38bdf8', // sky blue
+      '#4ade80', // emerald
+      '#facc15', // yellow
+      '#c084fc', // violet
+      '#22d3d8', // cyan
+      '#fb7185', // rose
+      '#a3e635', // lime
+    ];
+    let colorIndex = 0;
+
+    function getInjectColor(namespace) {
+      if (!injectColors[namespace]) {
+        injectColors[namespace] = injectColorPalette[colorIndex % injectColorPalette.length];
+        colorIndex++;
+      }
+      return injectColors[namespace];
+    }
+
+    // Tooltip descriptions for log types
+    const logDescriptions = {
+      system: 'Reflexive system messages (start, stop, errors)',
+      stdout: 'Standard output from your application',
+      stderr: 'Standard error output from your application',
+      'inject:info': 'Application info logs from instrumentation',
+      'inject:warn': 'Warning messages from instrumentation',
+      'inject:error': 'Error messages from instrumentation',
+      'inject:debug': 'Debug messages from instrumentation',
+      'inject:perf': 'Performance metrics (GC, event loop latency)',
+      'inject:http': 'HTTP request/response tracking',
+      'inject:db': 'Database query tracking',
+      'inject:fs': 'File system operation tracking',
+      'inject:net': 'Network connection tracking',
+      'inject:timer': 'Timer and interval tracking',
+      'inject:promise': 'Promise lifecycle tracking',
+      'inject:memory': 'Memory usage snapshots',
+      'inject:cpu': 'CPU usage metrics',
+    };
+
+    function getLogDescription(type) {
+      if (logDescriptions[type]) return logDescriptions[type];
+      if (type.startsWith('inject:')) {
+        const ns = type.replace('inject:', '');
+        return 'Instrumentation: ' + ns;
+      }
+      return null;
+    }
+
+    // Toggle output panel collapse
+    logsToggle.onclick = () => outputPanel.classList.toggle('collapsed');
+
+    // Resize handle
+    const resizeHandle = document.getElementById('resize-handle');
+    let isResizing = false;
+    let startX, startWidth;
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = outputPanel.offsetWidth;
+      resizeHandle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isResizing) return;
+      const diff = startX - e.clientX;
+      const newWidth = Math.max(200, Math.min(800, startWidth + diff));
+      outputPanel.style.width = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    });
+
+    // Clear logs button
+    clearLogsBtn.onclick = () => {
+      allLogs = [];
+      logsEl.innerHTML = '';
+      logFiltersEl.innerHTML = '';
+    };
+
+    // Pause/resume auto-scroll button
+    pauseLogsBtn.onclick = () => {
+      isPaused = !isPaused;
+      pauseLogsBtn.textContent = isPaused ? '▶' : '⏸';
+      pauseLogsBtn.title = isPaused ? 'Resume auto-scroll' : 'Pause auto-scroll';
+      pauseLogsBtn.classList.toggle('active', isPaused);
+    };
 
     marked.setOptions({ breaks: true, gfm: true });
 
@@ -579,6 +902,8 @@ function getDashboardHTML(options = {}) {
         i++;
       }
       while (openSpans > 0) { result += '</span>'; openSpans--; }
+      // Convert URLs to clickable links
+      result = result.replace(/(https?:\\/\\/[^\\s<>"']+)/g, '<a href="$1" target="_blank" rel="noopener" class="log-link">$1</a>');
       return result;
     }
 
@@ -649,15 +974,20 @@ function getDashboardHTML(options = {}) {
 
       inputEl.value = '';
       isLoading = true;
-      sendBtn.disabled = true;
+      sendBtn.classList.add('hidden');
+      stopBtn.classList.add('visible');
       addUserMessage(message);
       showThinking();
+
+      // Create abort controller for this request
+      currentAbortController = new AbortController();
 
       try {
         const res = await fetch('${chatEndpoint}', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
+          body: JSON.stringify({ message }),
+          signal: currentAbortController.signal
         });
 
         hideThinking();
@@ -667,37 +997,46 @@ function getDashboardHTML(options = {}) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\\n');
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\\n');
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.type === 'text') {
-                  fullText += data.content;
-                  updateBubbleContent(bubble, fullText);
-                  messagesEl.scrollTop = messagesEl.scrollHeight;
-                } else if (data.type === 'tool') {
-                  // Format tool name (strip mcp__ prefix)
-                  const toolName = data.name.replace(/^mcp__[^_]+__/, '');
-                  const inputs = Object.entries(data.input || {})
-                    .map(([k, v]) => k + ': ' + JSON.stringify(v))
-                    .join(', ');
-                  // Create HTML tool call badge
-                  const toolHtml = '<div class="tool-call"><span class="tool-icon">⚡</span><span class="tool-name">' + toolName + '</span>' + (inputs ? '<span class="tool-params">' + escapeHtml(inputs) + '</span>' : '') + '</div>';
-                  fullText += '\\n\\n' + toolHtml + '\\n\\n';
-                  updateBubbleContent(bubble, fullText);
-                  messagesEl.scrollTop = messagesEl.scrollHeight;
-                } else if (data.type === 'error') {
-                  updateBubbleContent(bubble, '**Error:** ' + data.message);
-                }
-              } catch (e) {}
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === 'text') {
+                    fullText += data.content;
+                    updateBubbleContent(bubble, fullText);
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                  } else if (data.type === 'tool') {
+                    // Format tool name (strip mcp__ prefix)
+                    const toolName = data.name.replace(/^mcp__[^_]+__/, '');
+                    const inputs = Object.entries(data.input || {})
+                      .map(([k, v]) => k + ': ' + JSON.stringify(v))
+                      .join(', ');
+                    // Create HTML tool call badge
+                    const toolHtml = '<div class="tool-call"><span class="tool-icon">⚡</span><span class="tool-name">' + toolName + '</span>' + (inputs ? '<span class="tool-params">' + escapeHtml(inputs) + '</span>' : '') + '</div>';
+                    fullText += '\\n\\n' + toolHtml + '\\n\\n';
+                    updateBubbleContent(bubble, fullText);
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                  } else if (data.type === 'error') {
+                    updateBubbleContent(bubble, '**Error:** ' + data.message);
+                  }
+                } catch (e) {}
+              }
             }
+          }
+        } catch (readError) {
+          if (readError.name === 'AbortError') {
+            fullText += '\\n\\n*[Response stopped]*';
+            updateBubbleContent(bubble, fullText);
+          } else {
+            throw readError;
           }
         }
 
@@ -706,16 +1045,30 @@ function getDashboardHTML(options = {}) {
         }
       } catch (e) {
         hideThinking();
-        const bubble = createStreamingMessage();
-        bubble.textContent = 'Error: ' + e.message;
+        if (e.name === 'AbortError') {
+          const bubble = createStreamingMessage();
+          bubble.textContent = '[Response stopped]';
+        } else {
+          const bubble = createStreamingMessage();
+          bubble.textContent = 'Error: ' + e.message;
+        }
       }
 
+      currentAbortController = null;
       isLoading = false;
-      sendBtn.disabled = false;
+      sendBtn.classList.remove('hidden');
+      stopBtn.classList.remove('visible');
       inputEl.focus();
     }
 
+    function stopResponse() {
+      if (currentAbortController) {
+        currentAbortController.abort();
+      }
+    }
+
     sendBtn.onclick = sendMessage;
+    stopBtn.onclick = stopResponse;
     inputEl.onkeydown = (e) => {
       if (e.key === 'Enter') sendMessage();
     };
@@ -960,13 +1313,92 @@ function getDashboardHTML(options = {}) {
 
     ${controlsScript}
 
+    ${breakpointScript}
+
+    function getLogCategory(type) {
+      if (type.startsWith('inject:')) return type;
+      return type;
+    }
+
+    function updateFilterChips(logs) {
+      // Collect all unique types including inject namespaces
+      const types = new Set();
+      logs.forEach(l => {
+        if (l.type.startsWith('inject:')) {
+          types.add(l.type);
+          if (!(l.type in injectFilters)) injectFilters[l.type] = true;
+        } else {
+          types.add(l.type);
+        }
+      });
+
+      // Build chips HTML
+      let chipsHtml = '';
+      ['system', 'stdout', 'stderr'].forEach(t => {
+        if (types.has(t)) {
+          const isDisabled = !logFilters[t];
+          const desc = getLogDescription(t);
+          const tooltipAttr = desc ? ' data-tooltip="' + desc + '"' : '';
+          chipsHtml += '<span class="log-filter ' + t + (isDisabled ? ' disabled' : '') + '" data-filter="' + t + '"' + tooltipAttr + '>' + t + '</span>';
+        }
+      });
+      // Add inject namespace chips with unique colors
+      Object.keys(injectFilters).sort().forEach(t => {
+        const isDisabled = !injectFilters[t];
+        const shortName = t.replace('inject:', '');
+        const color = getInjectColor(t);
+        const desc = getLogDescription(t);
+        const tooltipAttr = desc ? ' data-tooltip="' + desc + '"' : '';
+        const style = isDisabled
+          ? 'opacity:0.3;background:transparent;border-color:' + color + ';color:' + color
+          : 'background:' + color + '22;border-color:' + color + ';color:' + color;
+        chipsHtml += '<span class="log-filter" style="' + style + '" data-filter="' + t + '"' + tooltipAttr + '>' + shortName + '</span>';
+      });
+
+      logFiltersEl.innerHTML = chipsHtml;
+
+      // Add click handlers
+      logFiltersEl.querySelectorAll('.log-filter').forEach(chip => {
+        chip.onclick = () => {
+          const filter = chip.dataset.filter;
+          if (filter.startsWith('inject:')) {
+            injectFilters[filter] = !injectFilters[filter];
+            const color = getInjectColor(filter);
+            chip.style.opacity = injectFilters[filter] ? '1' : '0.3';
+            chip.style.background = injectFilters[filter] ? color + '22' : 'transparent';
+          } else {
+            logFilters[filter] = !logFilters[filter];
+            chip.classList.toggle('disabled');
+          }
+          renderFilteredLogs();
+        };
+      });
+    }
+
+    function renderFilteredLogs() {
+      const filtered = allLogs.filter(l => {
+        if (l.type.startsWith('inject:')) {
+          return injectFilters[l.type] !== false;
+        }
+        return logFilters[l.type] !== false;
+      });
+      logsEl.innerHTML = DOMPurify.sanitize(filtered.map(l => {
+        const isInject = l.type.startsWith('inject:');
+        const baseClass = isInject ? 'inject' : l.type;
+        const colorStyle = isInject ? ' style="color:' + getInjectColor(l.type) + '"' : '';
+        return '<div class="log-entry ' + baseClass + '" data-category="' + l.type + '">' +
+          '<span class="log-type"' + colorStyle + '>' + l.type + '</span>' +
+          '<span class="log-message">' + ansiToHtml(l.message) + '</span></div>';
+      }).join(''));
+      if (!isPaused) {
+        logsEl.scrollTop = logsEl.scrollHeight;
+      }
+    }
+
     function renderLogs(logs) {
-      logsEl.innerHTML = DOMPurify.sanitize(logs.map(l =>
-        '<div class="log-entry ' + l.type + '">' +
-        '<span class="log-type">' + l.type + '</span>' +
-        '<span class="log-message">' + ansiToHtml(l.message) + '</span></div>'
-      ).join(''));
-      logsEl.scrollTop = logsEl.scrollHeight;
+      allLogs = logs;
+      updateFilterChips(logs);
+      renderFilteredLogs();
     }
 
     async function refresh() {
@@ -987,6 +1419,7 @@ function getDashboardHTML(options = {}) {
     refresh();
     setInterval(refresh, 2000);
     inputEl.focus();
+
   </script>
 </body>
 </html>`;
@@ -1260,12 +1693,31 @@ Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
     onReady({ port, appState, server });
   });
 
+  // Programmatic chat function
+  async function chat(message) {
+    let fullResponse = '';
+    const chatStream = createChatStream(message, {
+      contextSummary: `Application state: ${JSON.stringify(appState.getStatus())}`,
+      systemPrompt: baseSystemPrompt,
+      mcpServer,
+      mcpServerName: 'reflexive-introspection'
+    });
+
+    for await (const chunk of chatStream) {
+      if (chunk.type === 'text') {
+        fullResponse += chunk.content;
+      }
+    }
+    return fullResponse;
+  }
+
   return {
     appState,
     server,
     log: (type, message) => appState.log(type, message),
     setState: (key, value) => appState.setState(key, value),
-    getState: (key) => appState.getState(key)
+    getState: (key) => appState.getState(key),
+    chat  // Programmatic AI chat
   };
 }
 
@@ -1311,6 +1763,8 @@ class ProcessManager {
     // Eval callbacks
     this.evalCallbacks = new Map();
     this.evalIdCounter = 0;
+    // Breakpoint state
+    this.activeBreakpoint = null;
   }
 
   on(event, handler) {
@@ -1551,6 +2005,38 @@ class ProcessManager {
         this.emit('globalsResponse', data);
         break;
 
+      case 'breakpoint':
+        // Breakpoint hit or resumed
+        if (data.action === 'hit') {
+          this.activeBreakpoint = {
+            id: data.id,
+            label: data.label,
+            context: data.context,
+            stack: data.stack,
+            state: data.state,
+            timestamp: timestamp || Date.now()
+          };
+          this._log('inject:breakpoint', `🔴 BREAKPOINT HIT [${data.label}]`);
+          this._log('inject:breakpoint', `Context: ${JSON.stringify(data.context)}`);
+          if (data.stack) {
+            this._log('inject:breakpoint', `Stack:\n${data.stack}`);
+          }
+          this.emit('breakpointHit', this.activeBreakpoint);
+        } else if (data.action === 'resumed') {
+          this._log('inject:breakpoint', `🟢 RESUMED [${data.label}] after ${data.pauseDuration}ms`);
+          this.activeBreakpoint = null;
+          this.emit('breakpointResumed', data);
+        }
+        break;
+
+      case 'breakpointError':
+        this._log('inject:breakpoint', `Breakpoint error: ${data.error}`);
+        break;
+
+      case 'activeBreakpointResponse':
+        this.emit('activeBreakpointResponse', data);
+        break;
+
       default:
         this._log('inject:unknown', `Unknown message type: ${type}`);
     }
@@ -1607,6 +2093,37 @@ class ProcessManager {
 
   getInjectedState() {
     return { ...this.injectedState };
+  }
+
+  getActiveBreakpoint() {
+    return this.activeBreakpoint;
+  }
+
+  resumeBreakpoint(returnValue) {
+    if (!this.activeBreakpoint) {
+      return false;
+    }
+    if (this.inject && this.child && this.injectionReady) {
+      try {
+        this.child.send({ reflexive: true, type: 'resumeBreakpoint', returnValue });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  triggerBreakpoint(label = 'remote') {
+    if (this.inject && this.child && this.injectionReady) {
+      try {
+        this.child.send({ reflexive: true, type: 'triggerBreakpoint', label });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
   }
 
   _handleInteractiveOutput(text, source) {
@@ -2015,6 +2532,74 @@ function createCliMcpServer(processManager, options) {
             };
           }
         }
+      ),
+
+      tool(
+        'get_active_breakpoint',
+        'Check if the app is paused at a breakpoint. Returns breakpoint info including label, context, and stack trace.',
+        {},
+        async () => {
+          if (!options.inject) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
+              }]
+            };
+          }
+          const bp = processManager.getActiveBreakpoint();
+          if (bp) {
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  paused: true,
+                  breakpoint: bp
+                }, null, 2)
+              }]
+            };
+          }
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ paused: false }, null, 2)
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'resume_breakpoint',
+        'Resume execution from a paused breakpoint. Optionally provide a return value that will be returned from the breakpoint() call.',
+        {
+          returnValue: z.any().optional().describe('Optional value to return from the breakpoint')
+        },
+        async ({ returnValue }) => {
+          if (!options.inject) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'Injection not enabled. Run with --inject flag.'
+              }]
+            };
+          }
+          const bp = processManager.getActiveBreakpoint();
+          if (!bp) {
+            return {
+              content: [{
+                type: 'text',
+                text: 'No active breakpoint to resume.'
+              }]
+            };
+          }
+          processManager.resumeBreakpoint(returnValue);
+          return {
+            content: [{
+              type: 'text',
+              text: `Resumed from breakpoint [${bp.label}]. Execution continuing.`
+            }]
+          };
+        }
       )
     ]
   });
@@ -2160,6 +2745,14 @@ function parseArgs(args) {
       options.capabilities.writeFiles = true;
     } else if (arg === '--shell') {
       options.capabilities.shellAccess = true;
+    } else if (arg === '--dangerously-skip-permissions') {
+      options.capabilities.readFiles = true;
+      options.capabilities.writeFiles = true;
+      options.capabilities.shellAccess = true;
+      options.capabilities.restart = true;
+      options.capabilities.networkAccess = true;
+      options.inject = true;
+      options.eval = true;
     } else if (arg === '--node-args') {
       options.nodeArgs = args[++i].split(' ');
     } else if (arg === '--help') {
@@ -2188,7 +2781,10 @@ Reflexive CLI
 Run any Node.js application with an AI agent that can see and control it.
 
 USAGE:
-  reflexive [options] <entry-file> [-- app-args...]
+  reflexive [options] [entry-file] [-- app-args...]
+
+  If no entry file is specified, reflexive will look for package.json and
+  let you select from available scripts (or auto-run "start" if it's the only one).
 
 OPTIONS:
   -p, --port <port>       Dashboard port (default: 3099)
@@ -2201,6 +2797,7 @@ OPTIONS:
   -c, --capabilities      Enable capabilities (comma-separated)
       --write             Enable file writing
       --shell             Enable shell access
+      --dangerously-skip-permissions  Enable ALL capabilities (write, shell, inject, eval, network)
       --node-args <args>  Arguments to pass to Node.js
       --help              Show this help
 
@@ -2212,9 +2809,11 @@ CAPABILITIES:
   networkAccess  Web search/fetch
 
 EXAMPLES:
+  reflexive                                    # Auto-detect from package.json
   reflexive ./index.js
   reflexive --port 4000 --watch ./server.js
   reflexive --write --shell ./script.js
+  reflexive --dangerously-skip-permissions     # All capabilities, auto-detect entry
   reflexive ./server.js -- --port 8080
 
 The agent can:
@@ -2226,6 +2825,115 @@ The agent can:
   - Modify files (if --write enabled)
   - Run commands (if --shell enabled)
 `);
+}
+
+async function resolveEntryFromPackageJson(options) {
+  const pkgPath = resolve(process.cwd(), 'package.json');
+  if (!existsSync(pkgPath)) {
+    return null;
+  }
+
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+
+  const scripts = pkg.scripts || {};
+  const scriptNames = Object.keys(scripts);
+
+  if (scriptNames.length === 0) {
+    return null;
+  }
+
+  let selectedScript;
+
+  // If only 'start' script exists, use it automatically
+  if (scriptNames.length === 1 && scriptNames[0] === 'start') {
+    selectedScript = 'start';
+    console.log(`Found package.json with start script, running: ${scripts.start}\n`);
+  } else {
+    // Let user select from available scripts
+    console.log('Found package.json with scripts:\n');
+    scriptNames.forEach((name, i) => {
+      console.log(`  ${i + 1}) ${name}: ${scripts[name]}`);
+    });
+    console.log();
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    const answer = await new Promise(resolve => {
+      rl.question('Select script number (or press Enter for "start"): ', resolve);
+    });
+    rl.close();
+
+    if (answer.trim() === '') {
+      if (scripts.start) {
+        selectedScript = 'start';
+      } else {
+        console.error('No "start" script found.');
+        return null;
+      }
+    } else {
+      const idx = parseInt(answer, 10) - 1;
+      if (idx >= 0 && idx < scriptNames.length) {
+        selectedScript = scriptNames[idx];
+      } else {
+        console.error('Invalid selection.');
+        return null;
+      }
+    }
+  }
+
+  const scriptCmd = scripts[selectedScript];
+
+  // Parse the script command to extract the entry file and args
+  // Handle: "node app.js", "node ./src/index.js --port 3000", etc.
+  const parts = scriptCmd.split(/\s+/);
+  let entryFile = null;
+  let scriptArgs = [];
+  let foundEntry = false;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+
+    // Skip 'node', 'nodejs', or node flags
+    if (part === 'node' || part === 'nodejs') continue;
+    if (part.startsWith('-') && !foundEntry) continue;
+
+    if (!foundEntry && (part.endsWith('.js') || part.endsWith('.mjs') || part.endsWith('.cjs'))) {
+      entryFile = part;
+      foundEntry = true;
+      // Enable inject for .js files
+      options.inject = true;
+    } else if (foundEntry) {
+      scriptArgs.push(part);
+    }
+  }
+
+  if (!entryFile) {
+    // Try to find any file that might be an entry point
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (part !== 'node' && part !== 'nodejs' && !part.startsWith('-') && existsSync(resolve(process.cwd(), part))) {
+        entryFile = part;
+        scriptArgs = parts.slice(i + 1);
+        break;
+      }
+    }
+  }
+
+  if (entryFile) {
+    options.appArgs = [...scriptArgs, ...options.appArgs];
+    console.log(`Running: ${entryFile} ${options.appArgs.join(' ')}\n`);
+    return entryFile;
+  }
+
+  return null;
 }
 
 async function startCliDashboard(processManager, options) {
@@ -2253,6 +2961,7 @@ async function startCliDashboard(processManager, options) {
           status: processManager.getState(),
           showControls: true,
           interactive: options.interactive,
+          inject: options.inject,
           logsEndpoint: '/logs',
           statusEndpoint: '/state',
           chatEndpoint: '/chat',
@@ -2345,6 +3054,48 @@ async function startCliDashboard(processManager, options) {
         return;
       }
 
+      if (pathname === '/shutdown' && req.method === 'POST') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+        await processManager.stop();
+        process.exit(0);
+      }
+
+      // Breakpoint controls (only when inject is enabled)
+      if (pathname === '/break' && req.method === 'POST') {
+        if (options.inject && processManager.injectionReady) {
+          processManager.triggerBreakpoint();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Injection not enabled or not ready' }));
+        }
+        return;
+      }
+
+      if (pathname === '/resume' && req.method === 'POST') {
+        if (options.inject && processManager.getActiveBreakpoint()) {
+          processManager.resumeBreakpoint();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No active breakpoint' }));
+        }
+        return;
+      }
+
+      if (pathname === '/breakpoint-status') {
+        const bp = processManager.getActiveBreakpoint();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          paused: !!bp,
+          breakpoint: bp || null
+        }));
+        return;
+      }
+
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));
 
@@ -2377,9 +3128,16 @@ async function main() {
   const options = parseArgs(args);
 
   if (!options.entry) {
-    console.error('Error: No entry file specified\n');
-    printHelp();
-    process.exit(1);
+    // Try to resolve from package.json
+    const resolved = await resolveEntryFromPackageJson(options);
+    if (resolved) {
+      options.entry = resolved;
+      options.open = true; // Auto-open dashboard when no explicit entry
+    } else {
+      console.error('Error: No entry file specified and no package.json scripts found\n');
+      printHelp();
+      process.exit(1);
+    }
   }
 
   if (!existsSync(options.entry)) {

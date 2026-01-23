@@ -69,8 +69,10 @@ function interceptErrors() {
       stack: err.stack,
       name: err.name
     });
-    // Re-throw to maintain default behavior
-    throw err;
+    // Print error and exit gracefully instead of re-throwing
+    // (re-throwing adds inject.cjs to the stack trace which is confusing)
+    originalConsole.error('\n' + err.stack);
+    process.exit(1);
   });
 
   process.on('unhandledRejection', (reason, promise) => {
@@ -171,6 +173,12 @@ function setupPerfHooks() {
   }
 }
 
+// Breakpoint management
+const breakpoints = new Map();
+let breakpointIdCounter = 0;
+let activeBreakpoint = null;
+let breakpointResolve = null;
+
 // Create process.reflexive API
 function createReflexiveAPI() {
   const state = {};
@@ -195,6 +203,35 @@ function createReflexiveAPI() {
     // Emit custom event
     emit(event, data) {
       sendToParent('event', { event, data });
+    },
+
+    // Set a breakpoint that pauses execution until resumed by the agent
+    async breakpoint(label = 'breakpoint', context = {}) {
+      const id = ++breakpointIdCounter;
+      const stack = new Error().stack.split('\n').slice(2).join('\n');
+
+      activeBreakpoint = { id, label, context, stack, timestamp: Date.now() };
+
+      sendToParent('breakpoint', {
+        action: 'hit',
+        id,
+        label,
+        context: serializeResult(context),
+        stack,
+        state: process.reflexive.getState()
+      });
+
+      originalConsole.log(`\n🔴 BREAKPOINT [${label}] - Execution paused. Waiting for agent to resume...\n`);
+
+      // Wait for resume signal from parent
+      return new Promise((resolve) => {
+        breakpointResolve = resolve;
+      });
+    },
+
+    // List all breakpoints (for programmatic use)
+    getBreakpoints() {
+      return Array.from(breakpoints.values());
     },
 
     // Mark a span for tracing
@@ -299,6 +336,58 @@ function setupParentMessageHandler() {
         const globals = Object.keys(global).filter(k => !k.startsWith('_'));
         sendToParent('globalsResponse', { globals });
         break;
+
+      case 'resumeBreakpoint':
+        // Resume from a breakpoint
+        if (activeBreakpoint && breakpointResolve) {
+          const bp = activeBreakpoint;
+          originalConsole.log(`\n🟢 RESUMED [${bp.label}] - Continuing execution...\n`);
+          sendToParent('breakpoint', {
+            action: 'resumed',
+            id: bp.id,
+            label: bp.label,
+            pauseDuration: Date.now() - bp.timestamp
+          });
+          activeBreakpoint = null;
+          breakpointResolve(msg.returnValue);
+          breakpointResolve = null;
+        } else {
+          sendToParent('breakpointError', { error: 'No active breakpoint to resume' });
+        }
+        break;
+
+      case 'getActiveBreakpoint':
+        // Get info about current breakpoint
+        if (activeBreakpoint) {
+          sendToParent('activeBreakpointResponse', {
+            active: true,
+            breakpoint: {
+              id: activeBreakpoint.id,
+              label: activeBreakpoint.label,
+              context: serializeResult(activeBreakpoint.context),
+              stack: activeBreakpoint.stack,
+              pausedFor: Date.now() - activeBreakpoint.timestamp
+            }
+          });
+        } else {
+          sendToParent('activeBreakpointResponse', { active: false });
+        }
+        break;
+
+      case 'triggerBreakpoint':
+        // Remotely triggered breakpoint from dashboard
+        if (!activeBreakpoint) {
+          // Trigger breakpoint asynchronously so it doesn't block the message handler
+          setImmediate(async () => {
+            await process.reflexive.breakpoint(msg.label || 'remote', {
+              triggeredRemotely: true,
+              timestamp: new Date().toISOString()
+            });
+          });
+        } else {
+          sendToParent('breakpointError', { error: 'Already at a breakpoint' });
+        }
+        break;
     }
   });
 }
@@ -380,5 +469,6 @@ module.exports = {
   getState: (key) => process.reflexive?.getState(key),
   log: (level, message, meta) => process.reflexive?.log(level, message, meta),
   emit: (event, data) => process.reflexive?.emit(event, data),
-  span: (name, fn) => process.reflexive?.span(name, fn)
+  span: (name, fn) => process.reflexive?.span(name, fn),
+  breakpoint: (label, context) => process.reflexive?.breakpoint(label, context)
 };

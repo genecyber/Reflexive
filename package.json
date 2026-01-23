@@ -15,7 +15,9 @@
     "demo": "node demo-instrumented.js",
     "demo:app": "node src/reflexive.js demo-app.js",
     "demo:inject": "node src/reflexive.js --inject demo-inject.js",
-    "demo:eval": "node src/reflexive.js --eval demo-inject.js"
+    "demo:eval": "node src/reflexive.js --eval demo-inject.js",
+    "demo:ai": "node demo-ai-features.js",
+    "demo:ai:inject": "node src/reflexive.js --inject demo-ai-features.js"
   },
   "keywords": [
     "ai",
