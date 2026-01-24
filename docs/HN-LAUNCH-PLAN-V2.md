@@ -52,19 +52,22 @@ Show HN: [Tool Name] - [Provocative One-liner that challenges assumptions]
 
 #### Optimal Posting Analysis
 
-**Statistical backing from HN data:**
+**Pick one of these two and commit:**
 
-| Time Window (PT) | Relative Performance | Notes |
-|------------------|---------------------|-------|
-| 8-9 AM Tue-Wed | 100% (baseline) | Peak developer attention, work mode |
-| 9-10 AM Mon | 85% | Monday ramp-up, competing priorities |
-| 6-8 AM Tue-Wed | 90% | Early birds, before major news |
-| 10 AM-12 PM any day | 75% | Post-launch window has closed |
-| Friday afternoon | 40% | Weekend dropoff begins |
-| Weekends | 50-60% | Fewer active users |
+##### Option A: "Classic" Visibility Window
+- **When:** Tue–Thu morning, 8:00–10:00 AM ET (5:00–7:00 AM PT)
+- **Pros:** Consistent attention; aligns with long-running folk wisdom
+- **Cons:** High competition from other launches
+
+##### Option B: "Low Competition" Window
+- **When:** 12:00–1:00 AM ET (9:00–10:00 PM PT)
+- **Pros:** Analysis suggests disproportionate comments/votes in this slot due to lower competition
+- **Cons:** You must be awake and intensely responsive for 2–3 hours
+
+**Recommendation:** If you're willing to be intensely present late night, choose **Option B** because your post benefits from high comment velocity (skeptic questions early = opportunity to demonstrate depth). If you want safer ergonomics, choose **Option A**.
 
 **Engagement decay curve:**
-- 0-2 hours: CRITICAL - responses must be <10 min
+- 0-2 hours: CRITICAL - responses must be <5 min (not 10)
 - 2-6 hours: Important - maintain presence
 - 6-24 hours: Follow-up on new comments
 - 24+ hours: Long-tail engagement
@@ -75,7 +78,11 @@ Show HN: [Tool Name] - [Provocative One-liner that challenges assumptions]
 
 ### The Buried Lead (DO NOT BURY THIS)
 
-This is not a launch for a debugging tool. This is a launch for **a new type of computing**.
+**IMPORTANT:** Do not say "new type of computing" in the submission. Let commenters say it for you. Instead, repeatedly describe the primitive:
+
+> "Agent loop + tools + process lifecycle + debugger + event triggers."
+
+Imply the paradigm shift. Don't declare it.
 
 #### The Dream
 
@@ -190,7 +197,7 @@ Minutes later - working webserver. And the agent kept working after I walked awa
 **The Holy Shit Moment:**
 I set a breakpoint, modified a value to say "Customer.Hacked", and resumed. The agent detected the anomaly, AUTONOMOUSLY isolated the vulnerable code, disabled it with a warning, and wrote a post-mortem. No prompt from me.
 
-It's not monitoring. It's not debugging. It's a new type of computing.
+Agent loop + process lifecycle + debugger + event triggers. All in one primitive.
 
   npx reflexive --write --debug app.js
   # Open http://localhost:3099
@@ -414,6 +421,31 @@ Is this emergent behavior? I'd argue yes - I didn't prompt "respond to security 
 Happy to share the exact logs and session if you want to see the tool calls.
 ```
 
+### The "Just a Wrapper" Criticism
+
+Response structure: clarify that the value is the integration primitive.
+
+```markdown
+Fair question. The Agent SDK is the same class of agent loop + tools that powers Claude Code, but Reflexive's value is embedding it into the lifecycle of a running process.
+
+What you get that you don't get from Claude Code alone:
+- Process lifecycle control (start/stop/restart from chat)
+- V8 debugger attachment (real breakpoints, scope inspection)
+- Watch triggers (event-driven prompting on log patterns)
+- Runtime state access (eval inside the running process)
+- Unified dashboard (logs + chat + process controls)
+
+It's the integration that creates the primitive. The agent loop is Claude's. The harness is Reflexive's.
+```
+
+### If Asked About Agent SDK Docs
+
+Point them to: [Claude Agent SDK documentation](https://docs.anthropic.com/en/docs/claude-code/agent-sdk) - the official framing is "Claude Code as a library."
+
+### Note on Security Credibility
+
+Anthropic itself is warning about risks of giving agents filesystem access. You look MORE credible by acknowledging this upfront rather than dismissing concerns. Lead with "Totally fair concern" not "It's fine because..."
+
 ---
 
 ## Part VII: Success Metrics and Tracking
@@ -434,11 +466,17 @@ Happy to share the exact logs and session if you want to see the tool calls.
 
 ### Key Performance Indicators
 
-**During Launch:**
-- Points at 1 hour: 15+ = good trajectory
-- Points at 2 hours: 30+ = likely front page
-- Comment count vs point count: should be roughly 1:3 ratio
-- Sentiment in comments: track positive/negative/neutral
+**Track only what affects the next action.** Don't emotionally spiral over numbers.
+
+**First 2 Hours (what actually matters):**
+- Response time: < 5 minutes per comment (not 10)
+- Comment sentiment: Are people debating "new primitive" vs "wrapper"? (You WANT that debate)
+- If security pile-on starts: Steer to "explicit flags + read-only mode"
+
+**First 24 Hours:**
+- Stars/day (momentum indicator)
+- Issues opened (quality > quantity)
+- "Tell me more about X" requests (signals real interest)
 
 **Week 1:**
 - GitHub stars: Track daily
@@ -534,7 +572,10 @@ your app
 ### T-7 Days
 - [ ] Video demo recorded and edited
 - [ ] GIF created from video highlights
-- [ ] README polished with video/GIF embedded
+- [ ] **README structure verified:** video → one command → what it enables → safety model
+- [ ] **Safety Model section** in README: default read-only, explicit flags, dev-first
+- [ ] **< 2 minute quickstart** works from fresh clone
+- [ ] **FAILURES.md created:** "If it breaks, paste this output" section
 - [ ] All demos tested and working
 - [ ] GitHub repo cleaned (no WIP files, secrets)
 - [ ] npm package published and tested
@@ -543,20 +584,21 @@ your app
 
 ### T-1 Day
 - [ ] Final test of all demos
-- [ ] Post text finalized
+- [ ] Post text finalized (no "new type of computing" - describe the primitive)
 - [ ] First comment drafted
-- [ ] FAQ responses rehearsed
+- [ ] FAQ responses rehearsed - especially "security nightmare" and "just a wrapper"
+- [ ] **Timing decision made:** Option A (8-10 AM ET Tue-Thu) or Option B (12-1 AM ET)
 - [ ] Calendar blocked for launch day
 - [ ] Backup device ready
 - [ ] Good sleep
 
 ### Launch Day
-- [ ] Post at 8:00-8:15 AM PT
+- [ ] Post at chosen time (Option A: 8-10 AM ET / Option B: 12-1 AM ET)
 - [ ] Immediately add first comment
 - [ ] Monitor /new to confirm visibility
-- [ ] Respond to every comment within 10 minutes (first 2 hours)
+- [ ] **Respond to every comment within 5 minutes** (first 2 hours)
 - [ ] DO NOT ask friends to upvote (HN detects this)
-- [ ] Stay engaged for minimum 4 hours
+- [ ] Stay engaged for minimum 4 hours (or 2-3 hours if Option B late night)
 - [ ] Document feedback for iteration
 
 ### Post-Launch
@@ -576,7 +618,9 @@ The features are impressive. The technical depth is real. But Reflexive will suc
 2. **The Discovery** - Claude Agent SDK = Claude Code = your own agent
 3. **The Experiment** - Going one layer deeper
 4. **The Magic** - It kept working. It caught the hack.
-5. **The Vision** - A new type of computing
+5. **The Primitive** - Agent loop + process lifecycle + debugger + event triggers
+
+**Do NOT say "new type of computing."** Let commenters say it for you. Describe the primitive repeatedly. Let the conclusion emerge.
 
 Lead with the story. Let the features follow. The "holy shit" moments sell themselves.
 
