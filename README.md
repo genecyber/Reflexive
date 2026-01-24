@@ -15,7 +15,7 @@ npx reflexive --write app.js
 
 ## Oneliner
 ```bash
-npm i -g reflexive
+npm i -g reflexive 
 echo "console.log('hello')" > app.js; reflexive --write --inject --open app.js
 ```
 
