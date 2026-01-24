@@ -1,6 +1,8 @@
 # Reflexive
 
-[VIDEO: demo.gif]
+![Demo](demo1.gif)
+
+[View full video (mp4)](demo1_clipped_4x.mp4)
 
 Embed Claude inside your running Node.js app. It sees logs, reads source, edits files, sets breakpoints, and responds to runtime events.
 
