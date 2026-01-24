@@ -13,6 +13,12 @@ npx reflexive --write app.js
 # Say: "Turn this into an Express server with a /users endpoint"
 ```
 
+## Oneliner
+```bash
+npm i -g reflexive
+echo "console.log('hello')" > app.js; reflexive --write --inject --open app.js
+```
+
 ## What This Is
 
 Claude Agent SDK (Claude Code as a library) + your running Node.js process = an agent that:
