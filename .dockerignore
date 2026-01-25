@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+
+# Build outputs (rebuilt in container)
+dist
+
+# Development files
+.git
+.gitignore
+.vscode
+.idea
+*.md
+!README.md
+
+# Test files
+src/__tests__
+*.test.ts
+*.spec.ts
+coverage
+
+# Config files not needed in container
+.eslintrc*
+.prettierrc*
+tsconfig.json
+tsconfig.build.json
+vitest.config.*
+
+# Example/demo files
+demo-*.js
+*.example.js
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Misc
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
