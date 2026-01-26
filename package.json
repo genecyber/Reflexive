@@ -17,18 +17,20 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
+    "build:all": "npm run build && npm run build:dashboard",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist dashboard/out",
     "prebuild": "npm run clean",
     "demo": "npm run build && node dist/cli.js demo-app.js",
     "demo:sandbox": "npm run build && node dist/cli.js --sandbox demo-app.js",
     "demo:legacy": "node src/reflexive.js demo-app.js",
-    "prepublishOnly": "npm run build && npm run test"
+    "prepublishOnly": "npm run build:all && npm run test"
   },
   "keywords": [
     "ai",
@@ -70,5 +72,12 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "src/reflexive.js",
+    "src/inject.cjs",
+    "dashboard/out",
+    "logo-carbon.png"
+  ]
 }

@@ -15,7 +15,7 @@ export function useReflexive() {
   // Fetch status
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/reflexive/status`);
+      const res = await fetch(`${API_BASE}/state`);
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
@@ -29,7 +29,7 @@ export function useReflexive() {
   // Fetch logs
   const fetchLogs = useCallback(async (count = 100) => {
     try {
-      const res = await fetch(`${API_BASE}/reflexive/logs?count=${count}`);
+      const res = await fetch(`${API_BASE}/logs?count=${count}`);
       if (res.ok) {
         const data = await res.json();
         setLogs(data);
@@ -239,7 +239,7 @@ export function useChat() {
     try {
       abortControllerRef.current = new AbortController();
 
-      const res = await fetch(`${API_BASE}/reflexive/chat`, {
+      const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),

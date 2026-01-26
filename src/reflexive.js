@@ -10,7 +10,7 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname, join } from 'path';
-import { existsSync, watch, realpathSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, watch, realpathSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
@@ -21,6 +21,83 @@ import WebSocket from 'ws';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ============================================================================
+// Static file serving for Next.js dashboard
+// ============================================================================
+
+const DASHBOARD_DIR = join(__dirname, '..', 'dashboard', 'out');
+const DASHBOARD_AVAILABLE = existsSync(DASHBOARD_DIR);
+
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain',
+};
+
+function serveStaticFile(res, filePath) {
+  try {
+    const ext = filePath.substring(filePath.lastIndexOf('.'));
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const data = readFileSync(filePath);
+
+    const cacheControl = ext === '.html'
+      ? 'no-cache'
+      : 'public, max-age=31536000, immutable';
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': cacheControl
+    });
+    res.end(data);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function tryServeDashboard(res, pathname) {
+  if (!DASHBOARD_AVAILABLE) return false;
+
+  // Remove /reflexive prefix to get the file path in the out directory
+  let relativePath = pathname.replace(/^\/reflexive/, '') || '/';
+
+  // Try exact file match first
+  let filePath = join(DASHBOARD_DIR, relativePath);
+  if (existsSync(filePath) && !filePath.endsWith('/')) {
+    const stat = statSync(filePath);
+    if (stat.isFile()) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try with index.html for directories
+  if (relativePath === '/' || relativePath.endsWith('/')) {
+    filePath = join(DASHBOARD_DIR, relativePath, 'index.html');
+    if (existsSync(filePath)) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try adding .html extension
+  filePath = join(DASHBOARD_DIR, relativePath + '.html');
+  if (existsSync(filePath)) {
+    return serveStaticFile(res, filePath);
+  }
+
+  return false;
+}
 
 // ============================================================================
 // Shared: AppState - tracks logs and custom state
@@ -3056,16 +3133,7 @@ ${systemPrompt}`;
       return;
     }
 
-    if (pathname === '/reflexive' || pathname === '/reflexive/') {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(getDashboardHTML({
-        title,
-        status: appState.getStatus(),
-        showControls: false
-      }));
-      return;
-    }
-
+    // API routes take priority
     if (pathname === '/reflexive/chat' && req.method === 'POST') {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -3105,6 +3173,24 @@ Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(appState.getLogs(count, type)));
       return;
+    }
+
+    // Try serving from Next.js dashboard build
+    if (pathname.startsWith('/reflexive')) {
+      if (tryServeDashboard(res, pathname)) {
+        return;
+      }
+
+      // Fall back to embedded HTML for main route if dashboard not available
+      if (pathname === '/reflexive' || pathname === '/reflexive/') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(getDashboardHTML({
+          title,
+          status: appState.getStatus(),
+          showControls: false
+        }));
+        return;
+      }
     }
 
     res.writeHead(404);
@@ -5357,7 +5443,13 @@ async function startCliDashboard(processManager, options) {
         return;
       }
 
+      // Redirect root to /reflexive if dashboard is available
       if (pathname === '/' || pathname === '/dashboard') {
+        if (DASHBOARD_AVAILABLE) {
+          res.writeHead(302, { 'Location': '/reflexive/' });
+          res.end();
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(getDashboardHTML({
           title: '⚡ Reflexive CLI',
@@ -5373,6 +5465,31 @@ async function startCliDashboard(processManager, options) {
           cliInputEndpoint: '/cli-input'
         }));
         return;
+      }
+
+      // Serve Next.js dashboard at /reflexive
+      if (pathname.startsWith('/reflexive')) {
+        if (tryServeDashboard(res, pathname)) {
+          return;
+        }
+        // Fall back to embedded HTML if dashboard not available
+        if (pathname === '/reflexive' || pathname === '/reflexive/') {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(getDashboardHTML({
+            title: '⚡ Reflexive CLI',
+            status: processManager.getState(),
+            showControls: true,
+            interactive: options.interactive,
+            inject: options.inject,
+            debug: options.debug,
+            capabilities: options.capabilities,
+            logsEndpoint: '/logs',
+            statusEndpoint: '/state',
+            chatEndpoint: '/chat',
+            cliInputEndpoint: '/cli-input'
+          }));
+          return;
+        }
       }
 
       // Interactive mode: direct CLI input
