@@ -11,10 +11,10 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname, join } from 'path';
-import { existsSync, readFileSync, writeFileSync, realpathSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'fs';
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
-import { createServer } from 'http';
+import { createServer, ServerResponse } from 'http';
 import { createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
 import { ProcessManager } from './managers/process-manager.js';
 import { SandboxManager } from './managers/sandbox-manager.js';
@@ -26,6 +26,83 @@ import type { Capabilities } from './types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// ============================================================================
+// Static file serving for Next.js dashboard
+// ============================================================================
+
+const DASHBOARD_DIR = join(__dirname, '..', 'dashboard', 'out');
+const DASHBOARD_AVAILABLE = existsSync(DASHBOARD_DIR);
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain',
+};
+
+function serveStaticFile(res: ServerResponse, filePath: string): boolean {
+  try {
+    const ext = filePath.substring(filePath.lastIndexOf('.'));
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const data = readFileSync(filePath);
+
+    const cacheControl = ext === '.html'
+      ? 'no-cache'
+      : 'public, max-age=31536000, immutable';
+
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': cacheControl
+    });
+    res.end(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tryServeDashboard(res: ServerResponse, pathname: string): boolean {
+  if (!DASHBOARD_AVAILABLE) return false;
+
+  // Remove /reflexive prefix to get the file path in the out directory
+  let relativePath = pathname.replace(/^\/reflexive/, '') || '/';
+
+  // Try exact file match first
+  let filePath = join(DASHBOARD_DIR, relativePath);
+  if (existsSync(filePath) && !filePath.endsWith('/')) {
+    const stat = statSync(filePath);
+    if (stat.isFile()) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try with index.html for directories
+  if (relativePath === '/' || relativePath.endsWith('/')) {
+    filePath = join(DASHBOARD_DIR, relativePath, 'index.html');
+    if (existsSync(filePath)) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try adding .html extension
+  filePath = join(DASHBOARD_DIR, relativePath + '.html');
+  if (existsSync(filePath)) {
+    return serveStaticFile(res, filePath);
+  }
+
+  return false;
+}
 
 interface CliOptions {
   entry: string | null;
@@ -387,7 +464,13 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         return;
       }
 
+      // Redirect root to /reflexive if Next.js dashboard is available
       if (pathname === '/' || pathname === '/dashboard') {
+        if (DASHBOARD_AVAILABLE) {
+          res.writeHead(302, { 'Location': '/reflexive/' });
+          res.end();
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(getDashboardHTML({
           title: 'Reflexive CLI',
@@ -403,6 +486,31 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
           cliInputEndpoint: '/cli-input'
         }));
         return;
+      }
+
+      // Serve Next.js dashboard at /reflexive
+      if (pathname.startsWith('/reflexive')) {
+        if (tryServeDashboard(res, pathname)) {
+          return;
+        }
+        // Fall back to embedded HTML if dashboard not available
+        if (pathname === '/reflexive' || pathname === '/reflexive/') {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(getDashboardHTML({
+            title: 'Reflexive CLI',
+            status: processManager.getState(),
+            showControls: true,
+            interactive: options.interactive,
+            inject: options.inject,
+            debug: options.debug,
+            capabilities: options.capabilities,
+            logsEndpoint: '/logs',
+            statusEndpoint: '/state',
+            chatEndpoint: '/chat',
+            cliInputEndpoint: '/cli-input'
+          }));
+          return;
+        }
       }
 
       // Interactive mode: direct CLI input
@@ -799,7 +907,13 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
         return;
       }
 
+      // Redirect root to /reflexive if Next.js dashboard is available
       if (pathname === '/' || pathname === '/dashboard') {
+        if (DASHBOARD_AVAILABLE) {
+          res.writeHead(302, { 'Location': '/reflexive/' });
+          res.end();
+          return;
+        }
         const state = sandboxManager.getState();
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(getDashboardHTML({
@@ -832,6 +946,48 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
           cliInputEndpoint: '/cli-input'
         }));
         return;
+      }
+
+      // Serve Next.js dashboard at /reflexive
+      if (pathname.startsWith('/reflexive')) {
+        if (tryServeDashboard(res, pathname)) {
+          return;
+        }
+        // Fall back to embedded HTML if dashboard not available
+        if (pathname === '/reflexive' || pathname === '/reflexive/') {
+          const state = sandboxManager.getState();
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(getDashboardHTML({
+            title: 'Reflexive Sandbox',
+            status: {
+              isRunning: state.isRunning,
+              pid: null,
+              uptime: state.startedAt ? Math.floor((Date.now() - state.startedAt) / 1000) : 0,
+              restartCount: 0,
+              exitCode: null,
+              entry: state.entry || '',
+              cwd: process.cwd(),
+              interactive: false,
+              waitingForInput: false,
+              inject: true,
+              injectionReady: state.isRunning,
+              debug: false,
+              debuggerConnected: false,
+              debuggerPaused: false,
+              inspectorUrl: null
+            },
+            showControls: true,
+            interactive: false,
+            inject: true,
+            debug: false,
+            capabilities: options.capabilities,
+            logsEndpoint: '/logs',
+            statusEndpoint: '/state',
+            chatEndpoint: '/chat',
+            cliInputEndpoint: '/cli-input'
+          }));
+          return;
+        }
       }
 
       if (pathname === '/chat' && req.method === 'POST') {
