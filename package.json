@@ -25,9 +25,9 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist dashboard/out",
+    "clean": "rm -rf dist",
     "prebuild": "npm run clean",
-    "demo": "npm run build && node dist/cli.js demo-app.js",
+    "demo": "npm run build && node dist/cli.js demo-app.js --dangerously-skip-permissions",
     "demo:sandbox": "npm run build && node dist/cli.js --sandbox demo-app.js",
     "demo:legacy": "node src/reflexive.js demo-app.js",
     "prepublishOnly": "npm run build:all && npm run test"
