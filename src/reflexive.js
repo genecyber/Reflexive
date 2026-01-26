@@ -409,11 +409,14 @@ function getDashboardHTML(options = {}) {
   <title>Reflexive</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #0a0a0f;
       color: #e0e0e0;
-      min-height: 100vh;
     }
     /* Custom scrollbars */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -421,7 +424,7 @@ function getDashboardHTML(options = {}) {
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #444; }
     * { scrollbar-width: thin; scrollbar-color: #333 #1a1a22; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 8px 12px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; }
     header {
       display: flex;
       justify-content: space-between;
@@ -489,7 +492,7 @@ function getDashboardHTML(options = {}) {
     .dot.running { background: #22c55e; }
     .dot.stopped { background: #ef4444; }
 
-    .grid { display: flex; gap: 0; height: calc(100vh - 100px); }
+    .grid { display: flex; gap: 0; flex: 1; min-height: 0; }
     @media (max-width: 900px) { .grid { flex-direction: column; } }
 
     .panel {
@@ -2161,6 +2164,29 @@ function getDashboardHTML(options = {}) {
       pauseLogsBtn.title = isPaused ? 'Resume auto-scroll' : 'Pause auto-scroll';
       pauseLogsBtn.classList.toggle('active', isPaused);
     };
+
+    // Auto-pause when user scrolls up, auto-resume when at bottom
+    let userScrolling = false;
+    logsEl.addEventListener('scroll', () => {
+      const atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 20;
+      if (atBottom && isPaused && !userScrolling) {
+        // User scrolled to bottom - resume auto-scroll
+        isPaused = false;
+        pauseLogsBtn.textContent = '⏸';
+        pauseLogsBtn.title = 'Pause auto-scroll';
+        pauseLogsBtn.classList.remove('active');
+      } else if (!atBottom && !isPaused) {
+        // User scrolled up - pause auto-scroll
+        isPaused = true;
+        pauseLogsBtn.textContent = '▶';
+        pauseLogsBtn.title = 'Resume auto-scroll';
+        pauseLogsBtn.classList.add('active');
+      }
+    });
+
+    // Track manual scrolls vs programmatic scrolls
+    logsEl.addEventListener('wheel', () => { userScrolling = true; setTimeout(() => { userScrolling = false; }, 100); });
+    logsEl.addEventListener('touchmove', () => { userScrolling = true; setTimeout(() => { userScrolling = false; }, 100); });
 
     marked.setOptions({ breaks: true, gfm: true });
 
