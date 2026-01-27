@@ -242,6 +242,11 @@ function parseArgs(args: string[]): CliOptions {
     } else if (arg === '--help') {
       printHelp();
       process.exit(0);
+    } else if (arg === '--version' || arg === '-v') {
+      const pkgPath = join(__dirname, '..', 'package.json');
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      console.log(`reflexive v${pkg.version}`);
+      process.exit(0);
     } else if (arg === '--') {
       options.appArgs = args.slice(i + 1);
       break;
@@ -287,6 +292,7 @@ OPTIONS:
       --shell             Enable shell access
       --node-args <args>  Arguments to pass to Node.js
       --help              Show this help
+  -v, --version           Show version number
 
 PRESETS:
       --dev               Preset: write + shell + eval (common development combo)
