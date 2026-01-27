@@ -57,6 +57,7 @@ export default function Dashboard() {
     sendCliInput,
     togglePermission,
     reloadSettings,
+    apiBase,
   } = useReflexive();
 
   const {
@@ -320,6 +321,7 @@ User prompt: ${entry.prompt}`;
           onRestart={restartProcess}
           onRunApp={runApp}
           onShutdown={handleShutdown}
+          apiBase={apiBase}
         />
 
         <div className="flex gap-0 flex-1 min-h-0">

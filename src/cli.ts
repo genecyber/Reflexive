@@ -893,6 +893,56 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         process.exit(0);
       }
 
+      // File browser endpoint - list files in a directory
+      // File browser endpoint - gated by readFiles capability
+      if (pathname === '/files') {
+        if (!options.capabilities.readFiles) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'File reading not enabled' }));
+          return;
+        }
+        const dir = url.searchParams.get('dir') || process.cwd();
+        try {
+          const absDir = resolve(dir);
+          if (!existsSync(absDir)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Directory not found' }));
+            return;
+          }
+          const stat = statSync(absDir);
+          if (!stat.isDirectory()) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Not a directory' }));
+            return;
+          }
+          const entries = readdirSync(absDir, { withFileTypes: true });
+          const files = entries
+            .filter(e => !e.name.startsWith('.')) // Hide dotfiles
+            .map(e => ({
+              name: e.name,
+              path: join(absDir, e.name),
+              isDirectory: e.isDirectory(),
+              isFile: e.isFile(),
+            }))
+            .sort((a, b) => {
+              // Directories first, then files
+              if (a.isDirectory && !b.isDirectory) return -1;
+              if (!a.isDirectory && b.isDirectory) return 1;
+              return a.name.localeCompare(b.name);
+            });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            dir: absDir,
+            parent: dirname(absDir),
+            files,
+          }));
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message }));
+        }
+        return;
+      }
+
       // V8 Inspector debugging endpoints (only when --debug is enabled)
       if (pathname === '/debugger-status') {
         if (!options.debug) {

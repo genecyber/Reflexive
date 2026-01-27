@@ -254,6 +254,9 @@ export function useReflexive() {
 
     // Settings reload
     reloadSettings,
+
+    // API base URL (for components that need direct access)
+    apiBase: API_BASE,
   };
 }
 

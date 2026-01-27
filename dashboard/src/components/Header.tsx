@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback } from 'react';
-import { ProcessStatus, Capabilities } from '@/types';
+import { useState } from 'react';
+import { ProcessStatus } from '@/types';
+import { FileBrowser } from './FileBrowser';
 
 interface HeaderProps {
   status: ProcessStatus | null;
@@ -11,17 +12,16 @@ interface HeaderProps {
   onRestart: () => void;
   onRunApp: (path: string) => Promise<void>;
   onShutdown: () => void;
+  apiBase: string;
 }
 
-export function Header({ status, showControls, onStart, onStop, onRestart, onRunApp, onShutdown }: HeaderProps) {
+export function Header({ status, showControls, onStart, onStop, onRestart, onRunApp, onShutdown, apiBase }: HeaderProps) {
   const isRunning = status?.isRunning ?? false;
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
 
-  const handleRunApp = useCallback(async () => {
-    const path = prompt('Enter the path to the Node.js file to run:');
-    if (path && path.trim()) {
-      await onRunApp(path.trim());
-    }
-  }, [onRunApp]);
+  const handleSelectFile = async (path: string) => {
+    await onRunApp(path);
+  };
 
   return (
     <header className="flex justify-between items-center py-1 px-0 border-b border-zinc-800 mb-2">
@@ -44,12 +44,18 @@ export function Header({ status, showControls, onStart, onStop, onRestart, onRun
       {showControls ? (
         <div className="flex gap-2">
           <button
-            onClick={handleRunApp}
+            onClick={() => setShowFileBrowser(true)}
             className="px-3 py-1.5 text-xs bg-zinc-800 border border-blue-500 rounded text-white hover:bg-blue-900"
             title="Run a different app"
           >
             Run App
           </button>
+          <FileBrowser
+            isOpen={showFileBrowser}
+            onClose={() => setShowFileBrowser(false)}
+            onSelectFile={handleSelectFile}
+            apiBase={apiBase}
+          />
           <button
             onClick={onStart}
             disabled={isRunning}
