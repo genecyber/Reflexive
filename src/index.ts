@@ -143,6 +143,21 @@ import { createLibraryTools } from './mcp/tools.js';
 import { createKnowledgeTools } from './mcp/knowledge-tools.js';
 import type { CustomTool } from './types/index.js';
 
+// Dynamic import for createSdkMcpServer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createSdkMcpServerFn: any = null;
+
+async function getCreateSdkMcpServer(): Promise<(config: { name: string; tools: unknown[] }) => unknown> {
+  if (createSdkMcpServerFn) return createSdkMcpServerFn;
+  try {
+    const sdk = await import('@anthropic-ai/claude-agent-sdk');
+    createSdkMcpServerFn = sdk.createSdkMcpServer;
+    return createSdkMcpServerFn;
+  } catch {
+    throw new Error('Claude Agent SDK not available. Install @anthropic-ai/claude-agent-sdk');
+  }
+}
+
 export interface MakeReflexiveOptions {
   port?: number;
   title?: string;
@@ -330,11 +345,14 @@ When users ask about Reflexive features or want to write code using Reflexive, u
 
 ${systemPrompt}`;
 
-  // Create MCP server for tools (simplified, full impl needs claude-agent-sdk)
-  const mcpServer = {
-    name: 'reflexive',
-    tools: allTools
-  };
+  // Lazily create MCP server using Claude Agent SDK
+  let mcpServer: unknown = null;
+  async function getMcpServer(): Promise<unknown> {
+    if (mcpServer) return mcpServer;
+    const createMcpServer = await getCreateSdkMcpServer();
+    mcpServer = createMcpServer({ name: 'reflexive', tools: allTools });
+    return mcpServer;
+  }
 
   const server = createServer(async (req, res) => {
     addCorsHeaders(res);
@@ -373,10 +391,11 @@ ${systemPrompt}`;
 Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
 
       try {
+        const server = await getMcpServer();
         const chatStream = createChatStream(message, {
           contextSummary,
           systemPrompt: baseSystemPrompt,
-          mcpServer,
+          mcpServer: server,
           mcpServerName: 'reflexive'
         });
 
@@ -416,10 +435,11 @@ Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
     let fullResponse = '';
 
     try {
+      const server = await getMcpServer();
       const chatStream = createChatStream(message, {
         contextSummary: `Application state: ${JSON.stringify(appState.getStatus())}`,
         systemPrompt: baseSystemPrompt,
-        mcpServer,
+        mcpServer: server,
         mcpServerName: 'reflexive-introspection'
       });
 
