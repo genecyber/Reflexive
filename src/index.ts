@@ -231,16 +231,24 @@ async function getCreateSdkMcpServer(): Promise<(config: { name: string; tools: 
 }
 
 export interface MakeReflexiveOptions {
+  /** Enable web dashboard UI (default: false) */
+  webUI?: boolean;
+  /** Port for web UI when enabled (default: 3099) */
   port?: number;
+  /** Dashboard title */
   title?: string;
+  /** Additional system prompt for the AI */
   systemPrompt?: string;
+  /** Custom MCP tools */
   tools?: CustomTool[];
+  /** Callback when ready (only called if webUI enabled) */
   onReady?: (info: { port: number; appState: AppState; server: Server }) => void;
 }
 
 export interface ReflexiveInstance {
   appState: AppState;
-  server: Server;
+  /** HTTP server (null if webUI disabled) */
+  server: Server | null;
   log: (type: string, message: string) => void;
   setState: (key: string, value: unknown) => void;
   getState: (key?: string) => unknown;
@@ -331,8 +339,8 @@ function createClientReflexive(cliPort: number): ReflexiveInstance {
 /**
  * Create a Reflexive instance embedded in your application
  *
- * This is the library mode API. It intercepts console methods,
- * provides a dashboard server, and exposes an AI chat interface.
+ * This is the library mode API. It intercepts console methods and
+ * exposes an AI chat interface. Web UI is disabled by default.
  *
  * When running under `reflexive app.js` (CLI mode), this automatically
  * connects to the parent CLI instead of starting its own server.
@@ -341,9 +349,12 @@ function createClientReflexive(cliPort: number): ReflexiveInstance {
  * ```ts
  * import { makeReflexive } from 'reflexive';
  *
- * const r = makeReflexive({ port: 3099, title: 'My App' });
- * r.setState('users', 42);
- * console.log('App started'); // This will be captured
+ * // Minimal - just programmatic chat, no web UI
+ * const r = makeReflexive();
+ * const response = await r.chat('Summarize the app state');
+ *
+ * // With web dashboard enabled
+ * const r = makeReflexive({ webUI: true, port: 3099 });
  * ```
  */
 export function makeReflexive(options: MakeReflexiveOptions = {}): ReflexiveInstance {
@@ -354,6 +365,7 @@ export function makeReflexive(options: MakeReflexiveOptions = {}): ReflexiveInst
   }
 
   const {
+    webUI = false,  // Web UI disabled by default
     port = 3099,
     title = 'Reflexive',
     systemPrompt = '',
@@ -426,152 +438,16 @@ ${systemPrompt}`;
     return mcpServer;
   }
 
-  const server = createServer(async (req, res) => {
-    addCorsHeaders(res);
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
-
-    const { pathname, searchParams } = parseUrl(req);
-
-    // API endpoints (must be checked before static file serving)
-    // Chat endpoint
-    if (pathname === '/reflexive/chat' && req.method === 'POST') {
-      const { message } = await parseJsonBody<{ message?: string }>(req);
-
-      if (!message) {
-        sendJson(res, { error: 'message required' }, 400);
-        return;
-      }
-
-      const status = appState.getStatus();
-      const recentLogs = appState.getLogs(10);
-      const contextSummary = `Application PID: ${status.pid}, uptime: ${status.uptime}s
-Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
-
-      try {
-        const server = await getMcpServer();
-        const chatStream = createChatStream(message, {
-          contextSummary,
-          systemPrompt: baseSystemPrompt,
-          mcpServer: server,
-          mcpServerName: 'reflexive'
-        });
-
-        await handleSSEResponse(res, chatStream);
-      } catch (error) {
-        sendJson(res, { error: error instanceof Error ? error.message : 'Chat error' }, 500);
-      }
-      return;
-    }
-
-    // Status endpoint (legacy path)
-    if (pathname === '/reflexive/status') {
-      sendJson(res, appState.getStatus());
-      return;
-    }
-
-    // State endpoint (Next.js dashboard uses /state)
-    if (pathname === '/state') {
-      // Return status with library mode flags
-      sendJson(res, {
-        ...appState.getStatus(),
-        isRunning: true,
-        showControls: false,  // Library mode doesn't have process controls
-        capabilities: {
-          readFiles: false,
-          writeFiles: false,
-          shellAccess: false,
-          restart: false,
-          inject: false,
-          eval: false,
-          debug: false
-        }
-      });
-      return;
-    }
-
-    // Logs endpoint (both paths for compatibility)
-    if (pathname === '/reflexive/logs' || pathname === '/logs') {
-      const count = parseInt(searchParams.get('count') || '50', 10);
-      const type = searchParams.get('type');
-      sendJson(res, appState.getLogs(count, type));
-      return;
-    }
-
-    // Chat endpoint (without /reflexive prefix for Next.js dashboard)
-    if (pathname === '/chat' && req.method === 'POST') {
-      const { message } = await parseJsonBody<{ message?: string }>(req);
-      if (!message) {
-        sendJson(res, { error: 'message required' }, 400);
-        return;
-      }
-      const status = appState.getStatus();
-      const recentLogs = appState.getLogs(10);
-      const contextSummary = `Application PID: ${status.pid}, uptime: ${status.uptime}s
-Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
-      try {
-        const mcpSrv = await getMcpServer();
-        const chatStream = createChatStream(message, {
-          contextSummary,
-          systemPrompt: baseSystemPrompt,
-          mcpServer: mcpSrv,
-          mcpServerName: 'reflexive'
-        });
-        await handleSSEResponse(res, chatStream);
-      } catch (error) {
-        sendJson(res, { error: error instanceof Error ? error.message : 'Chat error' }, 500);
-      }
-      return;
-    }
-
-    // Try serving Next.js dashboard static files
-    if (pathname.startsWith('/reflexive') || pathname === '/') {
-      // Redirect root to /reflexive
-      if (pathname === '/') {
-        res.writeHead(302, { Location: '/reflexive' });
-        res.end();
-        return;
-      }
-      // Try Next.js dashboard first
-      if (tryServeDashboard(res, pathname)) {
-        return;
-      }
-      // Fallback to embedded HTML for main dashboard page
-      if (pathname === '/reflexive' || pathname === '/reflexive/') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(getDashboardHTML({
-          title,
-          status: appState.getStatus(),
-          showControls: false
-        }));
-        return;
-      }
-    }
-
-    // 404
-    res.writeHead(404);
-    res.end('Not Found');
-  });
-
-  server.listen(port, () => {
-    originalConsole.log(`Reflexive dashboard: http://localhost:${port}/reflexive`);
-    onReady({ port, appState, server });
-  });
-
-  // Programmatic chat function
+  // Programmatic chat function (works with or without webUI)
   async function chat(message: string): Promise<string> {
     let fullResponse = '';
 
     try {
-      const server = await getMcpServer();
+      const srv = await getMcpServer();
       const chatStream = createChatStream(message, {
         contextSummary: `Application state: ${JSON.stringify(appState.getStatus())}`,
         systemPrompt: baseSystemPrompt,
-        mcpServer: server,
+        mcpServer: srv,
         mcpServerName: 'reflexive-introspection'
       });
 
@@ -585,6 +461,147 @@ Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
     }
 
     return fullResponse;
+  }
+
+  // Only start HTTP server if webUI is enabled
+  let server: Server | null = null;
+
+  if (webUI) {
+    server = createServer(async (req, res) => {
+      addCorsHeaders(res);
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const { pathname, searchParams } = parseUrl(req);
+
+      // API endpoints (must be checked before static file serving)
+      // Chat endpoint
+      if (pathname === '/reflexive/chat' && req.method === 'POST') {
+        const { message } = await parseJsonBody<{ message?: string }>(req);
+
+        if (!message) {
+          sendJson(res, { error: 'message required' }, 400);
+          return;
+        }
+
+        const status = appState.getStatus();
+        const recentLogs = appState.getLogs(10);
+        const contextSummary = `Application PID: ${status.pid}, uptime: ${status.uptime}s
+Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+
+        try {
+          const mcpSrv = await getMcpServer();
+          const chatStream = createChatStream(message, {
+            contextSummary,
+            systemPrompt: baseSystemPrompt,
+            mcpServer: mcpSrv,
+            mcpServerName: 'reflexive'
+          });
+
+          await handleSSEResponse(res, chatStream);
+        } catch (error) {
+          sendJson(res, { error: error instanceof Error ? error.message : 'Chat error' }, 500);
+        }
+        return;
+      }
+
+      // Status endpoint (legacy path)
+      if (pathname === '/reflexive/status') {
+        sendJson(res, appState.getStatus());
+        return;
+      }
+
+      // State endpoint (Next.js dashboard uses /state)
+      if (pathname === '/state') {
+        // Return status with library mode flags
+        sendJson(res, {
+          ...appState.getStatus(),
+          isRunning: true,
+          showControls: false,  // Library mode doesn't have process controls
+          capabilities: {
+            readFiles: false,
+            writeFiles: false,
+            shellAccess: false,
+            restart: false,
+            inject: false,
+            eval: false,
+            debug: false
+          }
+        });
+        return;
+      }
+
+      // Logs endpoint (both paths for compatibility)
+      if (pathname === '/reflexive/logs' || pathname === '/logs') {
+        const count = parseInt(searchParams.get('count') || '50', 10);
+        const type = searchParams.get('type');
+        sendJson(res, appState.getLogs(count, type));
+        return;
+      }
+
+      // Chat endpoint (without /reflexive prefix for Next.js dashboard)
+      if (pathname === '/chat' && req.method === 'POST') {
+        const { message } = await parseJsonBody<{ message?: string }>(req);
+        if (!message) {
+          sendJson(res, { error: 'message required' }, 400);
+          return;
+        }
+        const status = appState.getStatus();
+        const recentLogs = appState.getLogs(10);
+        const contextSummary = `Application PID: ${status.pid}, uptime: ${status.uptime}s
+Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+        try {
+          const mcpSrv = await getMcpServer();
+          const chatStream = createChatStream(message, {
+            contextSummary,
+            systemPrompt: baseSystemPrompt,
+            mcpServer: mcpSrv,
+            mcpServerName: 'reflexive'
+          });
+          await handleSSEResponse(res, chatStream);
+        } catch (error) {
+          sendJson(res, { error: error instanceof Error ? error.message : 'Chat error' }, 500);
+        }
+        return;
+      }
+
+      // Try serving Next.js dashboard static files
+      if (pathname.startsWith('/reflexive') || pathname === '/') {
+        // Redirect root to /reflexive
+        if (pathname === '/') {
+          res.writeHead(302, { Location: '/reflexive' });
+          res.end();
+          return;
+        }
+        // Try Next.js dashboard first
+        if (tryServeDashboard(res, pathname)) {
+          return;
+        }
+        // Fallback to embedded HTML for main dashboard page
+        if (pathname === '/reflexive' || pathname === '/reflexive/') {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(getDashboardHTML({
+            title,
+            status: appState.getStatus(),
+            showControls: false
+          }));
+          return;
+        }
+      }
+
+      // 404
+      res.writeHead(404);
+      res.end('Not Found');
+    });
+
+    server.listen(port, () => {
+      originalConsole.log(`Reflexive dashboard: http://localhost:${port}/reflexive`);
+      onReady({ port, appState, server: server! });
+    });
   }
 
   return {
