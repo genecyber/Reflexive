@@ -1,0 +1,32 @@
+# npm should ignore development files but INCLUDE the out/ directory
+
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+
+# development/build artifacts
+.next/
+coverage/
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+
+# source files (not needed in package - only out/ is needed)
+src/
+public/
+app/
+*.ts
+*.tsx
+*.json
+!package.json
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.env*

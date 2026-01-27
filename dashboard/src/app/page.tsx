@@ -65,9 +65,40 @@ export default function Dashboard() {
     clearMessages,
   } = useChat();
 
-  // Watch state (client-side only for now)
+  // Watch state with localStorage persistence
+  const WATCH_STORAGE_KEY = 'reflexive-watches';
   const [watches, setWatches] = useState<Watch[]>([]);
   const [watchIdCounter, setWatchIdCounter] = useState(0);
+  const watchesInitializedRef = useRef(false);
+
+  // Load watches from localStorage on mount
+  useEffect(() => {
+    if (watchesInitializedRef.current) return;
+    watchesInitializedRef.current = true;
+    try {
+      const stored = localStorage.getItem(WATCH_STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setWatches(parsed);
+          const maxId = Math.max(...parsed.map((w: Watch) => w.id));
+          setWatchIdCounter(maxId);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load watches from localStorage:', e);
+    }
+  }, []);
+
+  // Save watches to localStorage whenever they change
+  useEffect(() => {
+    if (!watchesInitializedRef.current) return;
+    try {
+      localStorage.setItem(WATCH_STORAGE_KEY, JSON.stringify(watches));
+    } catch (e) {
+      console.error('Failed to save watches to localStorage:', e);
+    }
+  }, [watches]);
 
   // Track which logs have been checked to avoid duplicate triggers
   const lastCheckedLogIndexRef = useRef(0);
@@ -302,9 +333,10 @@ User prompt: ${entry.prompt}`;
             onSendCliInput={sendCliInput}
           />
 
-          {/* Resize Handle */}
+          {/* Resize Handle - Vertical */}
           <div
-            className="w-2 cursor-col-resize flex-shrink-0 hover:bg-zinc-700 transition-colors relative group"
+            className="w-3 flex-shrink-0 relative group"
+            style={{ cursor: 'col-resize' }}
             onMouseDown={(e) => {
               const startX = e.clientX;
               const startWidth = rightPanelWidth;
@@ -324,7 +356,14 @@ User prompt: ${entry.prompt}`;
               document.addEventListener('mouseup', handleMouseUp);
             }}
           >
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-10 bg-zinc-700 rounded opacity-0 group-hover:opacity-100 transition-opacity" />
+            {/* Visible grip handle - 3 dots */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-1">
+              <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+              <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+              <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+            </div>
+            {/* Hover highlight bar */}
+            <div className="absolute inset-0 bg-zinc-700 opacity-0 group-hover:opacity-30 transition-opacity" />
           </div>
 
           {/* Right Panel - Logs + Debug */}
@@ -355,7 +394,9 @@ User prompt: ${entry.prompt}`;
                 status={status}
                 showControls={status?.showControls ?? true}
                 debugPanelsHeight={debugPanelsHeight}
+                watches={watches}
                 onAddWatch={handleAddWatch}
+                onEditWatch={handleEditWatch}
                 onResize={(height) => setDebugPanelsHeight(Math.max(60, Math.min(400, height)))}
               />
 

@@ -57,55 +57,36 @@ function parseToolCalls(content: string): { segments: Array<{ type: 'text' | 'to
   return { segments, hasToolCalls };
 }
 
-// Tool call badge component
-function ToolCallBadge({ toolInfo }: { toolInfo: ToolCallInfo }) {
-  const baseClasses = "inline-flex items-center gap-2 rounded-lg px-3 py-2 my-2 font-mono text-sm border";
-
-  const colorClasses = toolInfo.isSendInput
-    ? "bg-gradient-to-br from-[#1e3a2f] to-[#0f291a] border-[#22543d]"
-    : "bg-gradient-to-br from-[#1e293b] to-[#0f172a] border-[#334155]";
-
-  const nameColorClass = toolInfo.isSendInput ? "text-green-400" : "text-blue-400";
-
+// Tool call - uses EXACT original CSS classes
+function ToolCall({ toolInfo }: { toolInfo: ToolCallInfo }) {
   return (
-    <span className={`${baseClasses} ${colorClasses}`}>
-      <span className="text-base">⚡</span>
-      <span className={`${nameColorClass} font-semibold`}>{toolInfo.toolName}</span>
+    <div className={`tool-call ${toolInfo.isSendInput ? 'send-input' : ''}`}>
+      <span className="tool-icon">⚡</span>
+      <span className="tool-name">{toolInfo.toolName}</span>
       {toolInfo.params && (
-        <span className="text-slate-400 text-xs max-w-[350px] overflow-hidden text-ellipsis whitespace-nowrap">
-          {toolInfo.params}
-        </span>
+        <span className="tool-params">{toolInfo.params}</span>
       )}
-    </span>
+    </div>
   );
 }
 
-// Message content renderer with tool call support
+// Message content renderer - uses EXACT original .bubble class
 function MessageContent({ content }: { content: string }) {
   const { segments, hasToolCalls } = useMemo(() => parseToolCalls(content || ''), [content]);
 
   if (!hasToolCalls) {
-    return (
-      <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:p-3 prose-code:text-xs">
-        <ReactMarkdown>{content || '...'}</ReactMarkdown>
-      </div>
-    );
+    return <ReactMarkdown>{content || '...'}</ReactMarkdown>;
   }
 
   return (
-    <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:p-3 prose-code:text-xs">
+    <>
       {segments.map((segment, index) => {
         if (segment.type === 'tool' && segment.toolInfo) {
-          return (
-            <div key={index} className="not-prose">
-              <ToolCallBadge toolInfo={segment.toolInfo} />
-            </div>
-          );
+          return <ToolCall key={index} toolInfo={segment.toolInfo} />;
         }
-        // Render text segments as markdown
         return <ReactMarkdown key={index}>{segment.content}</ReactMarkdown>;
       })}
-    </div>
+    </>
   );
 }
 
@@ -180,37 +161,40 @@ export function ChatPanel({
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      {/* Messages - EXACT original structure */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '12px' }}>
         {messages.map((msg) => (
-          <div key={msg.id} className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}>
-            {/* Role label - like original */}
-            <div className="text-[10px] text-zinc-500 mb-1">
+          <div key={msg.id} className="message" style={{ marginBottom: '12px' }}>
+            {/* message-meta - EXACT original */}
+            <div className="message-meta">
               {msg.isWatchTrigger && msg.role === 'assistant'
                 ? `👁 watch triggered: ${msg.watchPattern?.slice(0, 30) || ''}`
                 : msg.role}
             </div>
+            {/* bubble - EXACT original backgrounds and margins */}
             <div
-              className={`p-3 rounded-lg text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-[#1e3a5f]'
-                  : 'bg-[#1a1a24]'
-              } ${msg.isWatchTrigger && msg.role === 'assistant' ? 'border-l-[3px] border-l-blue-500' : ''}`}
+              className="bubble"
+              style={{
+                background: msg.role === 'user' ? '#1e3a5f' : '#1a1a24',
+                marginLeft: msg.role === 'user' ? '30px' : undefined,
+                marginRight: msg.role === 'assistant' ? '30px' : undefined,
+                borderLeft: msg.isWatchTrigger && msg.role === 'assistant' ? '3px solid #3b82f6' : undefined,
+              }}
             >
               {msg.role === 'assistant' ? (
                 <MessageContent content={msg.content} />
               ) : (
-                <span>{msg.content}</span>
+                msg.content
               )}
             </div>
           </div>
         ))}
 
         {isLoading && messages[messages.length - 1]?.role === 'assistant' && !messages[messages.length - 1]?.content && (
-          <div className="flex gap-1 p-2">
-            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '-0.32s' }} />
-            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '-0.16s' }} />
-            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" />
+          <div className="thinking">
+            <span></span>
+            <span></span>
+            <span></span>
           </div>
         )}
         <div ref={messagesEndRef} />

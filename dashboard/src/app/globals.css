@@ -48,42 +48,87 @@ body {
   scrollbar-color: #3f3f46 #18181b;
 }
 
-/* Prose overrides for dark mode */
-.prose-invert {
-  --tw-prose-body: #a1a1aa;
-  --tw-prose-headings: #fafafa;
-  --tw-prose-links: #60a5fa;
-  --tw-prose-code: #e4e4e7;
-  --tw-prose-pre-bg: #09090b;
+/* EXACT copy of original reflexive.js chat styles */
+.bubble {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
-
-.prose pre {
-  background: #09090b;
-  border: 1px solid #27272a;
+.bubble p { margin: 0 0 0.5em 0; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble pre {
+  background: #0a0a0f;
+  padding: 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.5em 0;
 }
-
-.prose code {
+.bubble code {
   font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.8rem;
+}
+.bubble :not(pre) > code {
+  background: #0a0a0f;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+.bubble ul, .bubble ol { margin: 0.5em 0; padding-left: 1.5em; }
+.bubble li { margin: 0.25em 0; }
+.bubble h1, .bubble h2, .bubble h3 { margin: 0.5em 0; color: #fff; }
+.bubble h1 { font-size: 1.1rem; }
+.bubble h2 { font-size: 1rem; }
+.bubble h3 { font-size: 0.9rem; }
+.bubble a { color: #60a5fa; }
+.bubble strong { color: #fff; }
+
+.message-meta { font-size: 0.65rem; color: #555; margin-bottom: 3px; }
+
+.tool-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  font-size: 0.85rem;
+}
+.tool-call .tool-icon {
+  font-size: 1rem;
+}
+.tool-call .tool-name {
+  color: #60a5fa;
+  font-weight: 600;
+}
+.tool-call .tool-params {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  max-width: 350px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-call.send-input {
+  background: linear-gradient(135deg, #1e3a2f 0%, #0f291a 100%);
+  border-color: #22543d;
+}
+.tool-call.send-input .tool-name {
+  color: #4ade80;
 }
 
-.prose :not(pre) > code {
-  background: #27272a;
-  padding: 0.125rem 0.375rem;
-  border-radius: 0.25rem;
-  font-size: 0.875em;
+/* EXACT original thinking dots */
+.thinking { display: flex; gap: 4px; padding: 8px; }
+.thinking span {
+  width: 6px; height: 6px; background: #3b82f6; border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
 }
+.thinking span:nth-child(1) { animation-delay: -0.32s; }
+.thinking span:nth-child(2) { animation-delay: -0.16s; }
 
-.prose :not(pre) > code::before,
-.prose :not(pre) > code::after {
-  content: none;
-}
-
-/* Animation for loading dots */
 @keyframes bounce {
-  0%, 80%, 100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
 }

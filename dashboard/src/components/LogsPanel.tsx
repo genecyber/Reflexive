@@ -1,14 +1,16 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
-import type { LogEntry, ProcessStatus, LogFilter } from '@/types';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import type { LogEntry, ProcessStatus, LogFilter, Watch } from '@/types';
 
 interface LogsPanelProps {
   logs: LogEntry[];
   status: ProcessStatus | null;
   showControls: boolean;
   debugPanelsHeight?: number;
+  watches?: Watch[];  // For visual feedback on watched logs
   onAddWatch?: (message: string) => void;
+  onEditWatch?: (watch: Watch) => void;  // For editing existing watches
   onClearLogs?: () => void;
   onResize?: (height: number) => void;
 }
@@ -151,7 +153,18 @@ const FILTER_BUTTONS: { key: LogFilter; label: string; color: string; descriptio
   { key: 'inject', label: 'inject', color: 'border-purple-500 text-purple-500 bg-purple-500/10', description: 'Instrumentation logs from injected code' },
 ];
 
-export function LogsPanel({ logs, status, showControls, debugPanelsHeight, onAddWatch, onClearLogs, onResize }: LogsPanelProps) {
+export function LogsPanel({ logs, status, showControls, debugPanelsHeight, watches, onAddWatch, onEditWatch, onClearLogs, onResize }: LogsPanelProps) {
+  // Get watch for a message (matches original logic)
+  const getWatchForMessage = useCallback((message: string): Watch | null => {
+    if (!watches) return null;
+    const lowerMessage = message.toLowerCase();
+    for (const watch of watches) {
+      if (lowerMessage.includes(watch.pattern.toLowerCase())) {
+        return watch;
+      }
+    }
+    return null;
+  }, [watches]);
   const [filterText, setFilterText] = useState('');
   const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set(['stdout', 'stderr', 'system', 'inject', 'info', 'error', 'debug', 'warn']));
   const [isPaused, setIsPaused] = useState(false);
@@ -368,15 +381,29 @@ export function LogsPanel({ logs, status, showControls, debugPanelsHeight, onAdd
                   className="text-zinc-400 whitespace-pre-wrap break-all flex-1"
                   dangerouslySetInnerHTML={{ __html: processLogMessage(log.message) }}
                 />
-                {onAddWatch && (
-                  <button
-                    onClick={() => onAddWatch(log.message)}
-                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-blue-400 px-1"
-                    title="Add watch"
-                  >
-                    👁
-                  </button>
-                )}
+                {(onAddWatch || onEditWatch) && (() => {
+                  const existingWatch = getWatchForMessage(log.message);
+                  const isWatched = !!existingWatch;
+                  return (
+                    <button
+                      onClick={() => {
+                        if (existingWatch && onEditWatch) {
+                          onEditWatch(existingWatch);
+                        } else if (onAddWatch) {
+                          onAddWatch(log.message);
+                        }
+                      }}
+                      className={`px-1 ${
+                        isWatched
+                          ? 'text-blue-400 opacity-100'
+                          : 'opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-blue-400'
+                      }`}
+                      title={isWatched ? `Edit watch: ${existingWatch.pattern.slice(0, 30)}` : 'Add watch'}
+                    >
+                      👁
+                    </button>
+                  );
+                })()}
               </div>
             ))}
             <div ref={logsEndRef} />
@@ -402,10 +429,11 @@ export function LogsPanel({ logs, status, showControls, debugPanelsHeight, onAdd
         </>
       )}
 
-      {/* Vertical Resize Handle */}
+      {/* Horizontal Resize Handle */}
       {onResize && (
         <div
-          className="h-1.5 cursor-row-resize flex-shrink-0 hover:bg-zinc-700 transition-colors relative group"
+          className="h-3 flex-shrink-0 relative group"
+          style={{ cursor: 'row-resize' }}
           onMouseDown={(e) => {
             const startY = e.clientY;
             const startHeight = debugPanelsHeight || 180;
@@ -424,7 +452,14 @@ export function LogsPanel({ logs, status, showControls, debugPanelsHeight, onAdd
             document.addEventListener('mouseup', handleMouseUp);
           }}
         >
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-0.5 bg-zinc-700 rounded opacity-0 group-hover:opacity-100 transition-opacity" />
+          {/* Visible grip handle - 3 dots horizontal */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-row gap-1">
+            <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+            <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+            <div className="w-1 h-1 rounded-full bg-zinc-600 group-hover:bg-zinc-400 transition-colors" />
+          </div>
+          {/* Hover highlight bar */}
+          <div className="absolute inset-0 bg-zinc-700 opacity-0 group-hover:opacity-30 transition-opacity" />
         </div>
       )}
     </div>

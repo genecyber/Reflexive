@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "reflexive": "./dist/cli.js"
+    "reflexive": "./dist/cli.js",
+    "reflexive-legacy": "./src/reflexive.js"
   },
   "exports": {
     ".": {

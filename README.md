@@ -21,6 +21,21 @@ npm i -g reflexive
 echo "console.log('hello')" > app.js; reflexive --write --inject --open app.js
 ```
 
+## Versions
+
+As of v0.2.0, the default `reflexive` command uses:
+- **TypeScript CLI** - Modular architecture with separate managers for process, sandbox, and debugging
+- **Next.js Dashboard** - Modern React UI with real-time log streaming, ANSI color support, and watch triggers
+
+The original single-file JavaScript version is still available:
+
+```bash
+# Use legacy single-file JavaScript version
+reflexive-legacy ./app.js
+```
+
+Both versions have the same CLI interface and capabilities.
+
 ## What This Is
 
 Claude Agent SDK (Claude Code as a library) + your running Node.js process = an agent that:
@@ -264,7 +279,7 @@ npm run demo:ai       # AI-powered endpoints
 ## Links
 
 - Built on [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/agent-sdk) (Claude Code as a library)
-- ~1500 lines, single file, no build step
+- TypeScript CLI with Next.js dashboard (legacy single-file version available via `reflexive-legacy`)
 - [Troubleshooting](./FAILURES.md)
 
 ## License
