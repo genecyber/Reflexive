@@ -35,6 +35,7 @@ export type { LocalToolsOptions } from './mcp/local-tools.js';
 export { createCliTools, createAllCliTools } from './mcp/cli-tools.js';
 export type { CliToolsOptions } from './mcp/cli-tools.js';
 export { createHostedTools, getHostedToolNames } from './mcp/hosted-tools.js';
+export { createKnowledgeTools, createKnowledgeTool } from './mcp/knowledge-tools.js';
 
 // Manager exports
 export { ProcessManager } from './managers/process-manager.js';
@@ -139,6 +140,7 @@ import { getDashboardHTML } from './core/dashboard.js';
 import { createChatStream, handleSSEResponse } from './core/chat-stream.js';
 import { parseJsonBody, sendJson, parseUrl, addCorsHeaders } from './core/http-server.js';
 import { createLibraryTools } from './mcp/tools.js';
+import { createKnowledgeTools } from './mcp/knowledge-tools.js';
 import type { CustomTool } from './types/index.js';
 
 export interface MakeReflexiveOptions {
@@ -159,10 +161,94 @@ export interface ReflexiveInstance {
 }
 
 /**
+ * Create a client-mode Reflexive instance that connects to a parent CLI
+ * This is used when the app is run via `reflexive app.js` and uses makeReflexive()
+ */
+function createClientReflexive(cliPort: number): ReflexiveInstance {
+  const appState = new AppState();
+  const cliBaseUrl = `http://localhost:${cliPort}`;
+
+  console.log(`[reflexive] Running in CLI child mode, connecting to parent on port ${cliPort}`);
+
+  // Chat proxies to CLI's chat endpoint
+  async function chat(message: string): Promise<string> {
+    try {
+      const response = await fetch(`${cliBaseUrl}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Chat request failed: ${response.status}`);
+      }
+
+      // Handle SSE response - collect all text chunks
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      let fullResponse = '';
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        // Parse SSE events
+        const lines = chunk.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'text') {
+                fullResponse += data.content;
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+
+      return fullResponse;
+    } catch (error) {
+      return `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
+
+  // setState syncs to CLI
+  function setState(key: string, value: unknown): void {
+    appState.setState(key, value);
+    // Fire and forget - sync state to CLI
+    fetch(`${cliBaseUrl}/client-state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value })
+    }).catch(() => {
+      // Silently ignore sync errors
+    });
+  }
+
+  // Return client instance - no server started
+  return {
+    appState,
+    server: null as unknown as Server, // No server in client mode
+    log: (type: string, message: string) => appState.log(type, message),
+    setState,
+    getState: (key?: string) => appState.getState(key),
+    chat
+  };
+}
+
+/**
  * Create a Reflexive instance embedded in your application
  *
  * This is the library mode API. It intercepts console methods,
  * provides a dashboard server, and exposes an AI chat interface.
+ *
+ * When running under `reflexive app.js` (CLI mode), this automatically
+ * connects to the parent CLI instead of starting its own server.
  *
  * @example
  * ```ts
@@ -174,6 +260,12 @@ export interface ReflexiveInstance {
  * ```
  */
 export function makeReflexive(options: MakeReflexiveOptions = {}): ReflexiveInstance {
+  // Check if running under CLI - if so, connect to parent instead of starting server
+  if (process.env.REFLEXIVE_CLI_MODE === 'true' && process.env.REFLEXIVE_CLI_PORT) {
+    const cliPort = parseInt(process.env.REFLEXIVE_CLI_PORT, 10);
+    return createClientReflexive(cliPort);
+  }
+
   const {
     port = 3099,
     title = 'Reflexive',
@@ -187,7 +279,8 @@ export function makeReflexive(options: MakeReflexiveOptions = {}): ReflexiveInst
   // Create MCP server with tools
   // Note: Full MCP server integration happens via claude-agent-sdk
   const libraryTools = createLibraryTools(appState);
-  const allTools = [...libraryTools, ...tools];
+  const knowledgeTools = createKnowledgeTools();
+  const allTools = [...libraryTools, ...knowledgeTools, ...tools];
 
   // Intercept console methods
   const originalConsole = {
@@ -219,9 +312,22 @@ export function makeReflexive(options: MakeReflexiveOptions = {}): ReflexiveInst
     originalConsole.debug(...args);
   };
 
-  const baseSystemPrompt = `You are an AI assistant embedded inside a running Node.js application.
-You can introspect the application's state, logs, and custom data using the available tools.
-Help the user understand what's happening in their application, debug issues, and answer questions.
+  const baseSystemPrompt = `You are an AI assistant powered by Reflexive, embedded inside a running Node.js application.
+
+CAPABILITIES:
+- Introspect application state, logs, and custom data
+- Help users write code that leverages Reflexive's features
+- Build "hybrid" AI-native applications using reflexive.chat() for inline AI prompts
+
+SELF-KNOWLEDGE:
+You have access to \`reflexive_self_knowledge\` - use it to get detailed documentation about:
+- Library API (makeReflexive, chat, setState, getState, log)
+- CLI options and configuration
+- Patterns for building AI-native applications
+- Deployment and architecture
+
+When users ask about Reflexive features or want to write code using Reflexive, use this tool first.
+
 ${systemPrompt}`;
 
   // Create MCP server for tools (simplified, full impl needs claude-agent-sdk)

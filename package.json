@@ -76,6 +76,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "src/reflexive.js",
     "src/inject.cjs",
     "dashboard/out",

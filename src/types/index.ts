@@ -32,6 +32,7 @@ export interface ProcessState {
   inject: boolean;
   injectionReady: boolean;
   injectedState?: Record<string, unknown>;
+  clientState?: Record<string, unknown>;  // State from child makeReflexive() instances
   debug: boolean;
   debuggerConnected: boolean;
   debuggerPaused: boolean;

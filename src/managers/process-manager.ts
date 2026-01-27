@@ -25,6 +25,7 @@ export interface ProcessManagerOptions {
   eval?: boolean;
   debug?: boolean;
   watch?: boolean;
+  cliPort?: number;  // Port of the CLI dashboard for parent-child coordination
   capabilities?: {
     restart?: boolean;
   };
@@ -109,6 +110,9 @@ export class ProcessManager {
   // Queue of triggered breakpoint prompts for dashboard to consume
   private triggeredBreakpointPrompts: TriggeredBreakpointPrompt[] = [];
 
+  // State from child makeReflexive() instances (parent-child coordination)
+  private clientState: Record<string, unknown> = {};
+
   constructor(options: ProcessManagerOptions) {
     this.options = options;
     this.entry = resolve(options.entry);
@@ -157,9 +161,15 @@ export class ProcessManager {
 
   /**
    * Start the child process
+   * @param cliPort - Optional port of the CLI dashboard for parent-child coordination
    */
-  start(): void {
+  start(cliPort?: number): void {
     if (this._isRunning) return;
+
+    // Store CLI port for environment setup
+    if (cliPort) {
+      this.options.cliPort = cliPort;
+    }
 
     // Build node args, adding --require for injection if enabled
     const nodeArgs = [...(this.options.nodeArgs || [])];
@@ -184,13 +194,18 @@ export class ProcessManager {
       ? [stdinMode, 'pipe', 'pipe', 'ipc']
       : [stdinMode, 'pipe', 'pipe'];
 
-    // Set up environment for injection
+    // Set up environment for injection and CLI coordination
     const env: Record<string, string | undefined> = { ...process.env, FORCE_COLOR: '1' };
     if (this.inject) {
       env.REFLEXIVE_INJECT = 'true';
     }
     if (this.options.eval) {
       env.REFLEXIVE_EVAL = 'true';
+    }
+    // Enable parent-child coordination: if app uses makeReflexive(), it will connect to CLI instead
+    if (this.options.cliPort) {
+      env.REFLEXIVE_CLI_MODE = 'true';
+      env.REFLEXIVE_CLI_PORT = String(this.options.cliPort);
     }
 
     // Reset debugger state
@@ -901,11 +916,27 @@ export class ProcessManager {
       inject: this.inject,
       injectionReady: this.injectionReady,
       injectedState: this.inject ? this.injectedState : undefined,
+      clientState: Object.keys(this.clientState).length > 0 ? this.clientState : undefined,
       debug: this.debug,
       debuggerConnected: this.isDebuggerConnected(),
       debuggerPaused: this.isDebuggerPaused(),
       inspectorUrl: this.inspectorUrl
     };
+  }
+
+  /**
+   * Set state from child makeReflexive() instances (parent-child coordination)
+   */
+  setClientState(key: string, value: unknown): void {
+    this.clientState[key] = value;
+    this._log('system', `[client] setState: ${key} = ${JSON.stringify(value)}`);
+  }
+
+  /**
+   * Get client state from child makeReflexive() instances
+   */
+  getClientState(): Record<string, unknown> {
+    return { ...this.clientState };
   }
 
   /**

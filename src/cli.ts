@@ -22,6 +22,8 @@ import { getDashboardHTML } from './core/dashboard.js';
 import { createChatStream } from './core/chat-stream.js';
 import { createCliTools } from './mcp/cli-tools.js';
 import { createSandboxTools, getSandboxAllowedTools } from './mcp/sandbox-tools.js';
+import { createKnowledgeTools } from './mcp/knowledge-tools.js';
+import { parseJsonBody } from './core/http-server.js';
 import type { Capabilities } from './types/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -310,9 +312,22 @@ async function resolveEntryFromPackageJson(options: CliOptions): Promise<string 
 function buildSystemPrompt(processManager: ProcessManager, options: CliOptions): string {
   const state = processManager.getState();
   const parts: string[] = [
-    'You are an AI assistant controlling a Node.js process.',
+    'You are an AI assistant powered by Reflexive, controlling a Node.js process.',
     `Entry file: ${state.entry}`,
     `Working directory: ${state.cwd}`,
+    '',
+    'SELF-KNOWLEDGE: Use `reflexive_self_knowledge` to get detailed documentation about Reflexive.',
+    'This includes: CLI options, library API (makeReflexive, chat, setState), patterns for AI-native apps.',
+    '',
+    'CLARIFY APPROACH: When a user request could be done multiple ways, ASK which approach they prefer:',
+    '1. RUNTIME (temporary): Use --eval/--inject to do it now, works only while CLI is running',
+    '2. CODE CHANGE (permanent): Modify the source code, works when app runs standalone',
+    '3. LIBRARY MODE (permanent + AI): Install reflexive (`npm install reflexive`), use makeReflexive() and .chat() for AI-native features',
+    '',
+    'Example: "make it log a joke" could mean:',
+    '- Runtime: evaluate_in_app to log a joke now (temporary)',
+    '- Code change: edit the file to add console.log (permanent but static)',
+    '- Library mode: use reflexive.chat() to generate jokes dynamically (requires npm install)',
   ];
 
   if (options.interactive) {
@@ -357,9 +372,15 @@ function buildSystemPrompt(processManager: ProcessManager, options: CliOptions):
 function buildSandboxSystemPrompt(sandboxManager: SandboxManager, options: CliOptions): string {
   const state = sandboxManager.getState();
   const parts: string[] = [
-    'You are an AI assistant controlling a Node.js application running in an isolated Vercel Sandbox.',
+    'You are an AI assistant powered by Reflexive, controlling a Node.js application in an isolated Vercel Sandbox.',
     `Entry file: ${state.entry}`,
     'The app runs in a secure, isolated environment.',
+    '',
+    'SELF-KNOWLEDGE: Use `reflexive_self_knowledge` to get detailed documentation about Reflexive.',
+    '',
+    'CLARIFY APPROACH: When a user request could be done multiple ways, ASK which approach they prefer:',
+    '1. CODE CHANGE (permanent): Modify the source code',
+    '2. LIBRARY MODE (permanent + AI): Use makeReflexive() and .chat() for AI-native features (requires `npm install reflexive`)',
   ];
 
   parts.push('');
@@ -418,7 +439,7 @@ function getAllowedTools(capabilities: Capabilities): string[] {
 }
 
 async function startCliDashboard(processManager: ProcessManager, options: CliOptions): Promise<{ server: ReturnType<typeof createServer>; port: number }> {
-  // Create MCP server with CLI tools
+  // Create MCP server with CLI tools + knowledge tools
   const cliTools = createCliTools({
     processManager,
     capabilities: options.capabilities,
@@ -426,10 +447,12 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
     eval: options.eval,
     debug: options.debug
   });
+  const knowledgeTools = createKnowledgeTools();
+  const allTools = [...cliTools, ...knowledgeTools];
 
   const mcpServer = createSdkMcpServer({
     name: 'reflexive-cli',
-    tools: cliTools
+    tools: allTools
   });
 
   // Store conversation session ID for continuity
@@ -619,6 +642,25 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
           capabilities: options.capabilities,
           showControls: true
         }));
+        return;
+      }
+
+      // Receive state updates from child makeReflexive() instances
+      if (pathname === '/client-state' && req.method === 'POST') {
+        try {
+          const { key, value } = await parseJsonBody<{ key: string; value: unknown }>(req);
+          if (key) {
+            processManager.setClientState(key, value);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'key required' }));
+          }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message }));
+        }
         return;
       }
 
@@ -890,15 +932,17 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
 }
 
 async function startSandboxDashboard(sandboxManager: SandboxManager, options: CliOptions): Promise<{ server: ReturnType<typeof createServer>; port: number }> {
-  // Create MCP server with sandbox tools
+  // Create MCP server with sandbox tools + knowledge tools
   const sandboxTools = createSandboxTools({
     sandboxManager,
     capabilities: options.capabilities
   });
+  const knowledgeTools = createKnowledgeTools();
+  const allTools = [...sandboxTools, ...knowledgeTools];
 
   const mcpServer = createSdkMcpServer({
     name: 'reflexive-sandbox',
-    tools: sandboxTools
+    tools: allTools
   });
 
   // Store conversation session ID for continuity
@@ -1239,7 +1283,8 @@ Reflexive CLI
     spawn(cmd, [url], { shell: true, detached: true, stdio: 'ignore' });
   }
 
-  processManager.start();
+  // Pass CLI port for parent-child coordination
+  processManager.start(port);
 
   // Ignore SIGHUP so process survives terminal closing
   process.on('SIGHUP', () => {});

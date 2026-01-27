@@ -30,6 +30,7 @@ Comprehensive guide to using Reflexive for Node.js application introspection and
   - [Watch Triggers](#watch-triggers)
   - [Injection Mode](#injection-mode)
   - [Runtime Eval](#runtime-eval)
+  - [Hybrid AI-Native Patterns](#hybrid-ai-native-patterns)
 - [Troubleshooting](#troubleshooting)
 
 ## Operating Modes
@@ -731,6 +732,187 @@ Agent: [evaluate_in_app: code="cache.size"]
 ```
 
 **Warning**: `--eval` allows arbitrary code execution in your application. Use only in trusted development environments.
+
+#### How Eval/Inject Work with Library Mode
+
+Understanding the interaction between `--eval`, `--inject`, and `makeReflexive()` is important:
+
+**Key Insight**: These are orthogonal, independent systems that work together seamlessly:
+
+1. **Injection System** (`--inject` / `--eval`):
+   - Loads `inject.cjs` via Node's `--require` flag at process startup
+   - Instruments console methods, captures HTTP/GC events, event loop metrics
+   - `--eval` implies `--inject` and additionally enables `evaluate_in_app` tool
+   - Communicates via IPC (inter-process communication) with the CLI
+
+2. **Library Mode** (`makeReflexive()`):
+   - Your app calls `makeReflexive()` in its code
+   - Detects CLI mode via `REFLEXIVE_CLI_MODE` environment variable
+   - Connects as an HTTP client to the CLI's dashboard server
+   - `.chat()` and `.setState()` proxy to the CLI's endpoints
+
+**When used together** (`reflexive --eval app.js` where `app.js` uses `makeReflexive()`):
+- Both systems work independently and simultaneously
+- The agent gets eval capabilities from the injection system
+- The agent gets chat/state capabilities from the library integration
+- No conflicts - they use different communication channels (IPC vs HTTP)
+
+**Example: Full-Stack AI Application**
+```javascript
+import { makeReflexive } from 'reflexive';
+
+// Library mode: enables .chat() and .setState()
+const r = makeReflexive({ title: 'My App' });
+
+// Expose state for the agent
+r.setState('cache.size', 0);
+
+// Your app logic
+const cache = new Map();
+
+function addToCache(key, value) {
+  cache.set(key, value);
+  r.setState('cache.size', cache.size);  // Library mode
+}
+
+// Use AI programmatically
+const analysis = await r.chat('Analyze the cache usage');  // Library mode
+```
+
+Run with: `reflexive --eval --write app.js`
+
+Now the agent can:
+- Use `evaluate_in_app` to inspect `cache` directly (from `--eval` injection)
+- Use `get_custom_state` to read `cache.size` (from `makeReflexive()`)
+- Use `r.chat()` in your code for hybrid AI features (from `makeReflexive()`)
+- Modify files with `edit_file` (from `--write`)
+
+This powerful combination enables both AI-native application features AND deep runtime introspection.
+
+### Hybrid AI-Native Patterns
+
+One of Reflexive's most powerful features is building "hybrid" applications that use AI inline in your code via `reflexive.chat()`.
+
+#### The Pattern
+
+```typescript
+import { makeReflexive } from 'reflexive';
+
+const r = makeReflexive({ title: 'My App' });
+
+// Use .chat() to get AI responses programmatically
+const analysis = await r.chat('Analyze this error: ' + error.stack);
+```
+
+#### Why This Is Powerful
+
+Unlike typical AI integrations that just call an inference API, `reflexive.chat()`:
+- Has full context of your application (logs, state, process info)
+- Can use MCP tools (read files, execute commands if enabled)
+- Works both standalone AND when run via the CLI
+- Enables "AI-native" application features
+
+#### Example: Dynamic AI Endpoint
+
+```typescript
+import { makeReflexive } from 'reflexive';
+import http from 'http';
+
+const r = makeReflexive({ title: 'Story API' });
+
+http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+
+  // /story/dragons → AI writes a story about dragons
+  if (url.pathname.startsWith('/story/')) {
+    const topic = decodeURIComponent(url.pathname.slice(7));
+    const story = await r.chat(
+      `Write a short, creative story about: ${topic}. Return ONLY the story.`
+    );
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ topic, story }));
+    return;
+  }
+
+  res.writeHead(404);
+  res.end('Not found');
+}).listen(8080);
+
+console.log('Story API running on :8080');
+console.log('Try: curl http://localhost:8080/story/dragons');
+```
+
+#### Example: AI-Enhanced Error Handling
+
+```typescript
+import { makeReflexive } from 'reflexive';
+import fs from 'fs';
+
+const r = makeReflexive({ title: 'Error Logger' });
+
+async function riskyOperation() {
+  // ... code that might fail
+}
+
+try {
+  await riskyOperation();
+} catch (error) {
+  // Use AI to analyze the error
+  const analysis = await r.chat(
+    `Analyze this error and suggest fixes:\n\n${error.stack}`
+  );
+
+  // Log the analysis
+  const logEntry = `[${new Date().toISOString()}]\n${error.message}\n\nAI Analysis:\n${analysis}\n\n`;
+  fs.appendFileSync('error-log.txt', logEntry);
+
+  console.error('Error occurred, analysis logged to error-log.txt');
+}
+```
+
+#### Example: Smart Data Filtering
+
+```typescript
+import { makeReflexive } from 'reflexive';
+
+const r = makeReflexive({ title: 'Smart Filter' });
+
+const users = [
+  { name: 'Alice', role: 'Engineer', skills: ['Go', 'K8s'] },
+  { name: 'Bob', role: 'Designer', skills: ['Figma', 'CSS'] },
+  // ... more users
+];
+
+// Natural language filtering
+async function filterUsers(query) {
+  const response = await r.chat(
+    `Given this data: ${JSON.stringify(users)}\n\n` +
+    `Filter for: "${query}"\n\n` +
+    `Return ONLY a JSON array of matching names.`
+  );
+
+  const names = JSON.parse(response);
+  return users.filter(u => names.includes(u.name));
+}
+
+// Usage: filterUsers("engineers who know Kubernetes")
+```
+
+#### Running Hybrid Apps
+
+Your hybrid app works in both modes:
+
+```bash
+# Standalone - app has its own dashboard
+node app.js
+# Dashboard at http://localhost:3099/reflexive
+
+# With CLI - uses CLI's dashboard, .chat() still works
+reflexive app.js
+# Dashboard at CLI's port, same functionality
+```
+
+When run via CLI, `makeReflexive()` automatically detects this and connects to the parent CLI instead of starting its own server. This is seamless - your code doesn't need to change.
 
 ## Troubleshooting
 

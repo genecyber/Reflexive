@@ -37,6 +37,8 @@ Complete API documentation for Reflexive library mode, REST API, and TypeScript 
 
 Create a Reflexive instance embedded in your application.
 
+**Important:** When your app is run via `reflexive app.js` (CLI mode), `makeReflexive()` automatically detects this and connects to the parent CLI instead of starting its own server. This allows seamless integration - your app works both standalone and with the CLI.
+
 #### Signature
 ```typescript
 function makeReflexive(options?: MakeReflexiveOptions): ReflexiveInstance
@@ -49,7 +51,7 @@ interface MakeReflexiveOptions {
   title?: string;             // Dashboard title (default: 'Reflexive')
   systemPrompt?: string;      // Additional system prompt for AI
   tools?: CustomTool[];       // Custom MCP tools
-  onReady?: (info: {          // Called when server starts
+  onReady?: (info: {          // Called when server starts (standalone mode only)
     port: number;
     appState: AppState;
     server: Server;
@@ -84,6 +86,109 @@ const r = makeReflexive({
 r.setState('payments.processed', 1234);
 console.log('Payment system started');
 ```
+
+#### CLI Integration (Parent-Child Coordination)
+
+When you run your app with the Reflexive CLI:
+
+```bash
+reflexive app.js
+```
+
+The CLI sets environment variables that `makeReflexive()` detects:
+- `REFLEXIVE_CLI_MODE=true`
+- `REFLEXIVE_CLI_PORT=<port>`
+
+In this mode, `makeReflexive()` becomes a **client** that connects to the CLI's server:
+- `.chat()` calls are proxied to the CLI's `/chat` endpoint
+- `.setState()` syncs state to the CLI dashboard
+- No duplicate server is started
+- Logs flow through stdout (already captured by CLI)
+
+This means your app works identically in both scenarios:
+
+| How you run | What happens |
+|-------------|--------------|
+| `node app.js` | Standalone mode - starts own server on :3099 |
+| `reflexive app.js` | Client mode - connects to CLI's server |
+
+**Example: AI-Powered Endpoint**
+```typescript
+import { makeReflexive } from 'reflexive';
+import http from 'http';
+
+const r = makeReflexive({ title: 'Story API' });
+
+http.createServer(async (req, res) => {
+  if (req.url?.startsWith('/story/')) {
+    const topic = req.url.slice(7);
+    // This .chat() call works whether run standalone OR via CLI
+    const story = await r.chat(`Write a short story about: ${topic}`);
+    res.end(JSON.stringify({ story }));
+  }
+}).listen(8080);
+```
+
+Run standalone: `node app.js` → Dashboard at :3099
+Run with CLI: `reflexive app.js` → Use CLI's dashboard, same `.chat()` behavior
+
+#### Using makeReflexive() with CLI Capability Flags
+
+When using `makeReflexive()` under CLI mode with capability flags like `--eval`, both systems work together:
+
+```bash
+reflexive --eval --write --inject app.js
+```
+
+**What happens:**
+1. **Injection system** (from `--inject`/`--eval`):
+   - Loaded via Node's `--require` flag before your app starts
+   - Instruments console, HTTP, GC, event loop
+   - Provides `evaluate_in_app` tool to the agent (with `--eval`)
+   - Communicates with CLI via IPC
+
+2. **Library system** (from `makeReflexive()`):
+   - Your app's `makeReflexive()` call detects CLI mode
+   - Becomes a client, connects to CLI's HTTP server
+   - Provides `.chat()` and `.setState()` programmatic API
+   - Agent can use `get_custom_state` to read your setState values
+
+**Key point**: These are orthogonal systems that work independently. The agent gets:
+- Full eval capabilities from the injection system
+- Chat/state capabilities from library integration
+- No conflicts (different communication channels: IPC vs HTTP)
+
+**Example: Maximum AI Power**
+```typescript
+import { makeReflexive } from 'reflexive';
+
+const r = makeReflexive({ title: 'Advanced App' });
+
+// Expose state
+r.setState('requests.count', 0);
+
+let requestCount = 0;
+
+async function handleRequest(req) {
+  requestCount++;
+  r.setState('requests.count', requestCount);
+
+  // Use AI programmatically in your code
+  const suggestion = await r.chat('Should I cache this request?');
+
+  // Agent can also use evaluate_in_app to inspect requestCount directly
+}
+```
+
+Run with: `reflexive --eval --write app.js`
+
+The agent now has:
+- `evaluate_in_app` to inspect variables like `requestCount` directly
+- `get_custom_state` to read your `requests.count` state
+- `edit_file` to modify source files
+- Access to your programmatic `r.chat()` calls in the code
+
+This enables building truly AI-native applications with deep runtime introspection.
 
 ### ReflexiveInstance
 

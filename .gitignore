@@ -32,5 +32,5 @@ coverage/
 *.tmp
 *.temp
 # Private launch docs
-docs/HN-LAUNCH-PLAN.md
-docs/HN-LAUNCH-PLAN-V2.md
+*/HN-LAUNCH-PLAN.md
+*/HN-LAUNCH-PLAN-V2.md
