@@ -156,6 +156,26 @@ export function useReflexive() {
     await fetchStatus();
   }, [fetchStatus]);
 
+  // Reload reflexive with new settings
+  const reloadSettings = useCallback(async (settings: {
+    capabilities?: Record<string, boolean>;
+    interactive?: boolean;
+    debug?: boolean;
+    eval?: boolean;
+  }) => {
+    const res = await fetch(`${API_BASE}/reload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    const data = await res.json();
+    if (data.success) {
+      // Refresh status to get new state
+      await fetchStatus();
+    }
+    return data;
+  }, [fetchStatus]);
+
   // Polling
   useEffect(() => {
     fetchStatus();
@@ -219,6 +239,9 @@ export function useReflexive() {
 
     // Permissions
     togglePermission,
+
+    // Settings reload
+    reloadSettings,
   };
 }
 

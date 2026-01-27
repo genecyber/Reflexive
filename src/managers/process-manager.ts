@@ -8,7 +8,6 @@
 
 import { spawn, ChildProcess } from 'child_process';
 import { resolve, dirname } from 'path';
-import { watch, FSWatcher } from 'fs';
 import { fileURLToPath } from 'url';
 import { RemoteDebugger, BreakpointInfo, CallFrame } from './remote-debugger.js';
 import type { LogEntry, ProcessState, EventHandler } from '../types/index.js';
@@ -24,7 +23,6 @@ export interface ProcessManagerOptions {
   inject?: boolean;
   eval?: boolean;
   debug?: boolean;
-  watch?: boolean;
   cliPort?: number;  // Port of the CLI dashboard for parent-child coordination
   capabilities?: {
     restart?: boolean;
@@ -68,7 +66,6 @@ export class ProcessManager {
   private logs: LogEntry[] = [];
   private maxLogs = 500;
   private exitCode: number | null = null;
-  private watcher: FSWatcher | null = null;
 
   // Interactive mode state
   private interactive: boolean;
@@ -120,6 +117,32 @@ export class ProcessManager {
     this.interactive = options.interactive || false;
     this.inject = options.inject || false;
     this.debug = options.debug || false;
+  }
+
+  /**
+   * Update runtime options (used by /reload endpoint)
+   */
+  updateOptions(updates: {
+    interactive?: boolean;
+    inject?: boolean;
+    eval?: boolean;
+    debug?: boolean;
+  }): void {
+    if (updates.interactive !== undefined) {
+      this.interactive = updates.interactive;
+      this.options.interactive = updates.interactive;
+    }
+    if (updates.inject !== undefined) {
+      this.inject = updates.inject;
+      this.options.inject = updates.inject;
+    }
+    if (updates.eval !== undefined) {
+      this.options.eval = updates.eval;
+    }
+    if (updates.debug !== undefined) {
+      this.debug = updates.debug;
+      this.options.debug = updates.debug;
+    }
   }
 
   /**
@@ -272,10 +295,7 @@ export class ProcessManager {
         this.inspectorUrl = null;
       }
 
-      // Only auto-restart on crash (non-zero exit code), not on signal kills (intentional stop/restart)
-      if (this.options.watch && code !== null && code !== 0) {
-        setTimeout(() => this.restart(), 1000);
-      }
+      // Auto-restart removed - was part of --watch feature which has been removed
     });
 
     this.child.on('error', (err: Error) => {
@@ -289,10 +309,6 @@ export class ProcessManager {
         if (!message || !message.reflexive) return;
         this._handleInjectedMessage(message);
       });
-    }
-
-    if (this.options.watch && !this.watcher) {
-      this._setupWatcher();
     }
   }
 
@@ -877,27 +893,6 @@ export class ProcessManager {
     return recent.map(l => l.message).join('\n');
   }
 
-  /**
-   * Setup file watcher for auto-restart
-   */
-  private _setupWatcher(): void {
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    this.watcher = watch(this.cwd, { recursive: true }, (_event, filename) => {
-      if (!filename) return;
-      if (filename.includes('node_modules')) return;
-      if (filename.startsWith('.')) return;
-      if (filename.includes('/.')) return;
-      if (!filename.endsWith('.js') && !filename.endsWith('.mjs') && !filename.endsWith('.json')) return;
-      if (filename.includes('.tmp') || filename.includes('.swp') || filename.includes('~')) return;
-
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        this._log('system', `File changed: ${filename}`);
-        this.restart();
-      }, 500);
-    });
-  }
 
   /**
    * Get process state
@@ -985,13 +980,9 @@ export class ProcessManager {
   }
 
   /**
-   * Close the watcher and clean up
+   * Clean up resources
    */
   destroy(): void {
-    if (this.watcher) {
-      this.watcher.close();
-      this.watcher = null;
-    }
     if (this.debugger) {
       this.debugger.disconnect();
       this.debugger = null;

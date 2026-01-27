@@ -111,9 +111,8 @@ interface CliOptions {
   port: number;
   host: string;
   open: boolean;
-  watch: boolean;
   interactive: boolean;
-  inject: boolean;
+  inject: boolean;  // Internal flag: true when eval is enabled
   eval: boolean;
   debug: boolean;
   sandbox: boolean;
@@ -128,7 +127,6 @@ function parseArgs(args: string[]): CliOptions {
     port: 3099,
     host: 'localhost',
     open: false,
-    watch: false,
     interactive: false,
     inject: false,
     eval: false,
@@ -157,20 +155,22 @@ function parseArgs(args: string[]): CliOptions {
       options.host = args[++i];
     } else if (arg === '--open' || arg === '-o') {
       options.open = true;
-    } else if (arg === '--watch' || arg === '-w') {
-      options.watch = true;
     } else if (arg === '--interactive' || arg === '-i') {
       options.interactive = true;
-    } else if (arg === '--inject') {
-      options.inject = true;
-      options.capabilities.inject = true;
     } else if (arg === '--eval') {
+      // --eval now includes deep instrumentation (what --inject did)
+      options.inject = true;
       options.eval = true;
-      options.inject = true; // --eval implies --inject
       options.capabilities.eval = true;
-      options.capabilities.inject = true;
     } else if (arg === '--debug' || arg === '-d') {
       options.debug = true;
+      options.capabilities.debug = true;
+    } else if (arg === '--inspect') {
+      // --inspect = eval + debug (the \"poke around\" mode)
+      options.inject = true;
+      options.eval = true;
+      options.debug = true;
+      options.capabilities.eval = true;
       options.capabilities.debug = true;
     } else if (arg === '--sandbox' || arg === '-s') {
       options.sandbox = true;
@@ -186,12 +186,27 @@ function parseArgs(args: string[]): CliOptions {
       options.capabilities.writeFiles = true;
     } else if (arg === '--shell') {
       options.capabilities.shellAccess = true;
+    } else if (arg === '--dev') {
+      // --dev = write + shell + eval
+      options.capabilities.writeFiles = true;
+      options.capabilities.shellAccess = true;
+      options.capabilities.eval = true;
+      options.inject = true;
+      options.eval = true;
+    } else if (arg === '--full') {
+      // --full = write + shell + eval + debug (everything useful)
+      options.capabilities.writeFiles = true;
+      options.capabilities.shellAccess = true;
+      options.capabilities.eval = true;
+      options.capabilities.debug = true;
+      options.inject = true;
+      options.eval = true;
+      options.debug = true;
     } else if (arg === '--dangerously-skip-permissions') {
       options.capabilities.readFiles = true;
       options.capabilities.writeFiles = true;
       options.capabilities.shellAccess = true;
       options.capabilities.restart = true;
-      options.capabilities.inject = true;
       options.capabilities.eval = true;
       options.capabilities.debug = true;
       options.inject = true;
@@ -234,31 +249,37 @@ OPTIONS:
   -p, --port <port>       Dashboard port (default: 3099)
   -h, --host <host>       Dashboard host (default: localhost)
   -o, --open              Open dashboard in browser
-  -w, --watch             Restart on file changes
   -i, --interactive       Interactive mode: proxy stdin/stdout through agent
   -s, --sandbox           Run in Vercel Sandbox (isolated environment)
-      --inject            Inject deep instrumentation (console, diagnostics, perf)
-      --eval              Enable runtime code evaluation (DANGEROUS, implies --inject)
-  -d, --debug             Enable V8 Inspector debugging (real breakpoints, stepping, scope inspection)
+      --eval              Enable runtime code evaluation (includes deep instrumentation)
+  -d, --debug             Enable V8 Inspector debugging (breakpoints, stepping, scope inspection)
+      --inspect           Enable eval + debug (the "poke around" mode)
   -c, --capabilities      Enable capabilities (comma-separated)
       --write             Enable file writing
       --shell             Enable shell access
-      --dangerously-skip-permissions  Enable ALL capabilities (write, shell, inject, eval, debug, network)
       --node-args <args>  Arguments to pass to Node.js
       --help              Show this help
+
+PRESETS:
+      --dev               Preset: write + shell + eval (common development combo)
+      --full              Preset: write + shell + eval + debug (everything useful)
+      --dangerously-skip-permissions  Enable ALL capabilities (same as --full)
 
 CAPABILITIES:
   readFiles      Read project files (default: on)
   writeFiles     Write/edit files
   shellAccess    Run shell commands
   restart        Restart the process (default: on)
+  eval           Runtime code evaluation with deep instrumentation
+  debug          V8 Inspector debugging
 
 EXAMPLES:
   reflexive                                    # Auto-detect from package.json
   reflexive ./index.js                         # Run specific file
   reflexive --sandbox ./app.js                 # Run in isolated Vercel Sandbox
-  reflexive --watch --inject ./app.js          # Watch mode with injection
-  reflexive --debug --eval ./server.js         # Full debugging capabilities
+  reflexive --dev ./app.js                     # Development mode (write + shell + eval)
+  reflexive --inspect ./server.js              # Full introspection (eval + debug)
+  reflexive --full ./server.js                 # All capabilities enabled
   reflexive ./app.js -- --port 8080            # Pass args to your app
 `);
 }
@@ -320,7 +341,7 @@ function buildSystemPrompt(processManager: ProcessManager, options: CliOptions):
     'This includes: CLI options, library API (makeReflexive, chat, setState), patterns for AI-native apps.',
     '',
     'CLARIFY APPROACH: When a user request could be done multiple ways, ASK which approach they prefer:',
-    '1. RUNTIME (temporary): Use --eval/--inject to do it now, works only while CLI is running',
+    '1. RUNTIME (temporary): Use --eval to do it now, works only while CLI is running',
     '2. CODE CHANGE (permanent): Modify the source code, works when app runs standalone',
     '3. LIBRARY MODE (permanent + AI): Install reflexive (`npm install reflexive`), use makeReflexive() and .chat() for AI-native features',
     '',
@@ -337,16 +358,13 @@ function buildSystemPrompt(processManager: ProcessManager, options: CliOptions):
     parts.push('Read the recent output carefully to understand what the app is asking for.');
   }
 
-  if (options.inject) {
-    parts.push('');
-    parts.push('INJECTION MODE: Deep instrumentation is enabled.');
-    parts.push('You can access custom state via process.reflexive.setState() and get_injected_state.');
-    parts.push('Console logs, errors, and diagnostics are captured.');
-  }
+
 
   if (options.eval) {
     parts.push('');
     parts.push('EVAL MODE: Runtime code evaluation is enabled.');
+    parts.push('EVAL MODE includes deep instrumentation: console, diagnostics, and state tracking.');
+    parts.push('EVAL MODE includes deep instrumentation: console, diagnostics, and state tracking.');
     parts.push('You can execute arbitrary JavaScript in the app context with evaluate_in_app.');
     parts.push('Use this power responsibly - you can inspect and modify the running application.');
   }
@@ -410,11 +428,9 @@ function getAllowedTools(capabilities: Capabilities): string[] {
     tools.push('restart_process', 'stop_process', 'start_process');
   }
 
-  if (capabilities.inject) {
-    tools.push('get_injected_state', 'get_injection_logs');
-  }
-
   if (capabilities.eval) {
+    // eval includes injection, so add both eval and injection tools
+    tools.push('get_injected_state', 'get_injection_logs');
     tools.push('evaluate_in_app', 'list_app_globals');
   }
 
@@ -635,12 +651,80 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         return;
       }
 
+      // Reload reflexive with new settings (capabilities and modes)
+      if (pathname === '/reload' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        try {
+          const settings = JSON.parse(body);
+
+          // Update capabilities
+          if (settings.capabilities) {
+            for (const [key, value] of Object.entries(settings.capabilities)) {
+              if (key in options.capabilities) {
+                options.capabilities[key as keyof Capabilities] = value as boolean;
+              }
+            }
+          }
+
+          // Update mode flags
+          if (settings.interactive !== undefined) {
+            options.interactive = settings.interactive;
+          }
+          if (settings.debug !== undefined) {
+            options.debug = settings.debug;
+            options.capabilities.debug = settings.debug;
+          }
+          if (settings.inject !== undefined) {
+            options.inject = settings.inject;
+          }
+          if (settings.eval !== undefined) {
+            options.eval = settings.eval;
+            options.capabilities.eval = settings.eval;
+            // --eval implies --inject
+            if (settings.eval) {
+              options.inject = true;
+            }
+          }
+
+          // Update ProcessManager options and restart the process
+          processManager.updateOptions({
+            interactive: options.interactive,
+            inject: options.inject,
+            eval: options.eval,
+            debug: options.debug,
+          });
+          await processManager.restart();
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            success: true,
+            settings: {
+              capabilities: options.capabilities,
+              interactive: options.interactive,
+              debug: options.debug,
+              inject: options.inject,
+              eval: options.eval,
+            }
+          }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message }));
+        }
+        return;
+      }
+
       if (pathname === '/state') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           ...processManager.getState(),
           capabilities: options.capabilities,
-          showControls: true
+          showControls: true,
+          // Mode flags for dashboard toggles
+          interactive: options.interactive,
+          inject: options.inject,
+          eval: options.eval,
+          debug: options.debug
         }));
         return;
       }
@@ -998,7 +1082,6 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
             cwd: process.cwd(),
             interactive: false,
             waitingForInput: false,
-            inject: true,
             injectionReady: state.isRunning,
             debug: false,
             debuggerConnected: false,
@@ -1007,7 +1090,6 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
           },
           showControls: true,
           interactive: false,
-          inject: true,
           debug: false,
           capabilities: options.capabilities,
           logsEndpoint: '/logs',
@@ -1039,7 +1121,6 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
               cwd: process.cwd(),
               interactive: false,
               waitingForInput: false,
-              inject: true,
               injectionReady: state.isRunning,
               debug: false,
               debuggerConnected: false,
@@ -1048,7 +1129,6 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
             },
             showControls: true,
             interactive: false,
-            inject: true,
             debug: false,
             capabilities: options.capabilities,
             logsEndpoint: '/logs',
@@ -1127,7 +1207,6 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
           customState: state.customState,
           capabilities: options.capabilities,
           showControls: true,
-          inject: true,
           debug: false
         }));
         return;
@@ -1251,7 +1330,6 @@ async function main(): Promise<void> {
     inject: options.inject,
     eval: options.eval,
     debug: options.debug,
-    watch: options.watch,
     capabilities: {
       restart: options.capabilities.restart
     }
@@ -1265,7 +1343,6 @@ Reflexive CLI
 
   Dashboard: ${url}
   Entry:     ${resolve(options.entry)}
-  Watch:     ${options.watch ? 'enabled' : 'disabled'}
   Interactive: ${options.interactive ? 'enabled (stdin proxied)' : 'disabled'}
   Debug:     ${options.debug ? 'enabled (V8 Inspector)' : 'disabled'}
 

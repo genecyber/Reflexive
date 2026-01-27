@@ -22,8 +22,9 @@ export interface ProcessStatus {
   // Server-provided config
   capabilities?: Capabilities;
   showControls?: boolean;
+  // Mode flags
   interactive?: boolean;
-  inject?: boolean;
+  eval?: boolean;
   debug?: boolean;
 }
 
@@ -32,7 +33,7 @@ export interface Capabilities {
   writeFiles: boolean;
   shellAccess: boolean;
   restart: boolean;
-  networkAccess: boolean;
+  networkAccess?: boolean;  // Optional, not always present
   inject: boolean;
   eval: boolean;
   debug: boolean;

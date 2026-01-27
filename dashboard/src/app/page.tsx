@@ -55,6 +55,7 @@ export default function Dashboard() {
     deleteBreakpoint,
     sendCliInput,
     togglePermission,
+    reloadSettings,
   } = useReflexive();
 
   const {
@@ -408,6 +409,9 @@ User prompt: ${entry.prompt}`;
                   debuggerStatus={debuggerStatus}
                   showDebug={status?.debug ?? false}
                   height={debugPanelsHeight}
+                  interactive={status?.interactive}
+                  eval={status?.eval}
+                  debug={status?.debug}
                   onEditWatch={handleEditWatch}
                   onDeleteWatch={handleDeleteWatch}
                   onToggleWatch={handleToggleWatch}
@@ -419,6 +423,7 @@ User prompt: ${entry.prompt}`;
                   onDebuggerStepInto={debuggerStepInto}
                   onDebuggerStepOut={debuggerStepOut}
                   onTogglePermission={togglePermission}
+                  onReloadSettings={reloadSettings}
                 />
               )}
             </div>

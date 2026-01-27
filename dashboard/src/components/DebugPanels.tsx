@@ -10,6 +10,10 @@ interface DebugPanelsProps {
   debuggerStatus: DebuggerStatus | null;
   showDebug: boolean;
   height?: number;
+  // Mode flags from status
+  interactive?: boolean;
+  eval?: boolean;
+  debug?: boolean;
   onEditWatch: (watch: Watch) => void;
   onDeleteWatch: (id: number) => void;
   onToggleWatch: (id: number, enabled: boolean) => void;
@@ -21,6 +25,12 @@ interface DebugPanelsProps {
   onDebuggerStepInto: () => void;
   onDebuggerStepOut: () => void;
   onTogglePermission?: (permission: string) => void;
+  onReloadSettings?: (settings: {
+    capabilities?: Record<string, boolean>;
+    interactive?: boolean;
+    debug?: boolean;
+    eval?: boolean;
+  }) => Promise<unknown>;
 }
 
 export function DebugPanels({
@@ -30,6 +40,9 @@ export function DebugPanels({
   debuggerStatus,
   showDebug,
   height,
+  interactive,
+  eval: evalMode,
+  debug: debugMode,
   onEditWatch,
   onDeleteWatch,
   onToggleWatch,
@@ -41,15 +54,77 @@ export function DebugPanels({
   onDebuggerStepInto,
   onDebuggerStepOut,
   onTogglePermission,
+  onReloadSettings,
 }: DebugPanelsProps) {
+  const [modesCollapsed, setModesCollapsed] = useState(false);
   const [permissionsCollapsed, setPermissionsCollapsed] = useState(false);
   const [watchCollapsed, setWatchCollapsed] = useState(false);
   const [debuggerCollapsed, setDebuggerCollapsed] = useState(false);
+  const [reloading, setReloading] = useState(false);
 
   const isPaused = debuggerStatus?.connected && debuggerStatus?.paused;
 
+  // Handler for mode toggles - triggers reload with new settings
+  const handleModeToggle = async (mode: 'interactive' | 'debug' | 'inject' | 'eval', enabled: boolean) => {
+    if (!onReloadSettings || reloading) return;
+    setReloading(true);
+    try {
+      await onReloadSettings({ [mode]: enabled });
+    } finally {
+      setReloading(false);
+    }
+  };
+
+  // Handler for capability toggles that require reload (inject, eval, debug)
+  const handleCapabilityToggle = async (capability: string) => {
+    const needsReload = ['inject', 'eval', 'debug'].includes(capability);
+    if (needsReload && onReloadSettings && !reloading) {
+      setReloading(true);
+      try {
+        const newValue = !capabilities[capability as keyof Capabilities];
+        await onReloadSettings({ capabilities: { [capability]: newValue } });
+      } finally {
+        setReloading(false);
+      }
+    } else if (onTogglePermission) {
+      onTogglePermission(capability);
+    }
+  };
+
   return (
     <div className="flex flex-col border-t border-zinc-800 overflow-y-auto" style={height ? { height, flexShrink: 0 } : undefined}>
+      {/* Modes Section - runtime modes that require process restart */}
+      <DebugSection
+        title="Modes"
+        badge={reloading ? <span className="ml-auto px-1.5 py-0.5 text-[10px] bg-amber-900 rounded animate-pulse">reloading...</span> : undefined}
+        collapsed={modesCollapsed}
+        onToggle={() => setModesCollapsed(!modesCollapsed)}
+      >
+        <div className="grid grid-cols-2 gap-1 p-2">
+          <ModeToggle
+            label="Interactive"
+            enabled={interactive ?? false}
+            description="Proxy stdin/stdout"
+            disabled={reloading}
+            onToggle={(enabled) => handleModeToggle('interactive', enabled)}
+          />
+          <ModeToggle
+            label="Debug"
+            enabled={debugMode ?? false}
+            description="V8 Inspector breakpoints"
+            disabled={reloading}
+            onToggle={(enabled) => handleModeToggle('debug', enabled)}
+          />
+          <ModeToggle
+            label="Eval"
+            enabled={evalMode ?? false}
+            description="Runtime eval + injection"
+            disabled={reloading}
+            onToggle={(enabled) => handleModeToggle('eval', enabled)}
+          />
+        </div>
+      </DebugSection>
+
       {/* Permissions Section */}
       <DebugSection
         title="Permissions"
@@ -60,11 +135,7 @@ export function DebugPanels({
           <PermissionItem label="Read Files" enabled={capabilities.readFiles} permissionKey="readFiles" onToggle={onTogglePermission} />
           <PermissionItem label="Write Files" enabled={capabilities.writeFiles} permissionKey="writeFiles" onToggle={onTogglePermission} />
           <PermissionItem label="Shell Access" enabled={capabilities.shellAccess} permissionKey="shellAccess" onToggle={onTogglePermission} />
-          <PermissionItem label="Restart Process" enabled={capabilities.restart} permissionKey="restart" onToggle={onTogglePermission} />
-          <PermissionItem label="Network Access" enabled={capabilities.networkAccess} permissionKey="networkAccess" onToggle={onTogglePermission} />
-          <PermissionItem label="Injection" enabled={capabilities.inject} permissionKey="inject" onToggle={onTogglePermission} />
-          <PermissionItem label="Eval" enabled={capabilities.eval} permissionKey="eval" onToggle={onTogglePermission} />
-          <PermissionItem label="V8 Debugging" enabled={capabilities.debug} permissionKey="debug" onToggle={onTogglePermission} />
+          <PermissionItem label="Restart" enabled={capabilities.restart} permissionKey="restart" onToggle={onTogglePermission} />
         </div>
       </DebugSection>
 
@@ -324,4 +395,36 @@ function DebuggerBadge({ enabled, connected, paused }: DebuggerBadgeProps) {
     return <span className="ml-auto px-1.5 py-0.5 text-[10px] bg-red-600 rounded animate-pulse">PAUSED</span>;
   }
   return <span className="ml-auto px-1.5 py-0.5 text-[10px] bg-green-900 rounded">running</span>;
+}
+
+interface ModeToggleProps {
+  label: string;
+  enabled: boolean;
+  description?: string;
+  disabled?: boolean;
+  onToggle: (enabled: boolean) => void;
+}
+
+function ModeToggle({ label, enabled, description, disabled, onToggle }: ModeToggleProps) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] bg-zinc-900 ${
+        enabled ? 'text-blue-400' : 'text-zinc-600'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-zinc-800'}`}
+      onClick={() => !disabled && onToggle(!enabled)}
+      title={description}
+    >
+      <input
+        type="checkbox"
+        checked={enabled}
+        disabled={disabled}
+        onChange={(e) => {
+          e.stopPropagation();
+          if (!disabled) onToggle(e.target.checked);
+        }}
+        className="w-3 h-3 accent-blue-500"
+      />
+      <span>{label}</span>
+    </div>
+  );
 }

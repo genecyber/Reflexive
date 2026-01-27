@@ -32,7 +32,7 @@ export interface ProcessState {
   inject: boolean;
   injectionReady: boolean;
   injectedState?: Record<string, unknown>;
-  clientState?: Record<string, unknown>;  // State from child makeReflexive() instances
+  clientState?: Record<string, unknown>;
   debug: boolean;
   debuggerConnected: boolean;
   debuggerPaused: boolean;
@@ -44,7 +44,7 @@ export interface Capabilities {
   writeFiles: boolean;
   shellAccess: boolean;
   restart: boolean;
-  inject: boolean;
+  inject: boolean;  // Required by cli.ts capabilities initialization
   eval: boolean;
   debug: boolean;
 }

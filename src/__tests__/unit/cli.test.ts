@@ -34,16 +34,6 @@ describe('CLI', () => {
       expect(options.open).toBe(true);
     });
 
-    it('parses watch flag', () => {
-      const options = parseArgs(['--watch', './app.js']);
-      expect(options.watch).toBe(true);
-    });
-
-    it('parses short watch flag', () => {
-      const options = parseArgs(['-w', './app.js']);
-      expect(options.watch).toBe(true);
-    });
-
     it('parses interactive flag', () => {
       const options = parseArgs(['--interactive', './app.js']);
       expect(options.interactive).toBe(true);
@@ -54,18 +44,37 @@ describe('CLI', () => {
       expect(options.interactive).toBe(true);
     });
 
-    it('parses inject flag', () => {
-      const options = parseArgs(['--inject', './app.js']);
-      expect(options.inject).toBe(true);
-      expect(options.capabilities.inject).toBe(true);
-    });
-
-    it('parses eval flag (implies inject)', () => {
+    it('parses eval flag (includes injection)', () => {
       const options = parseArgs(['--eval', './app.js']);
       expect(options.eval).toBe(true);
+      expect(options.inject).toBe(true);  // eval implies inject
+      expect(options.capabilities.eval).toBe(true);
+    });
+
+    it('parses inspect flag (eval + debug)', () => {
+      const options = parseArgs(['--inspect', './app.js']);
+      expect(options.eval).toBe(true);
+      expect(options.debug).toBe(true);
       expect(options.inject).toBe(true);
       expect(options.capabilities.eval).toBe(true);
-      expect(options.capabilities.inject).toBe(true);
+      expect(options.capabilities.debug).toBe(true);
+    });
+
+    it('parses dev preset (write + shell + eval)', () => {
+      const options = parseArgs(['--dev', './app.js']);
+      expect(options.capabilities.writeFiles).toBe(true);
+      expect(options.capabilities.shellAccess).toBe(true);
+      expect(options.eval).toBe(true);
+      expect(options.inject).toBe(true);
+    });
+
+    it('parses full preset (write + shell + eval + debug)', () => {
+      const options = parseArgs(['--full', './app.js']);
+      expect(options.capabilities.writeFiles).toBe(true);
+      expect(options.capabilities.shellAccess).toBe(true);
+      expect(options.eval).toBe(true);
+      expect(options.debug).toBe(true);
+      expect(options.inject).toBe(true);
     });
 
     it('parses debug flag', () => {
@@ -105,7 +114,6 @@ describe('CLI', () => {
       expect(options.capabilities.writeFiles).toBe(true);
       expect(options.capabilities.shellAccess).toBe(true);
       expect(options.capabilities.restart).toBe(true);
-      expect(options.capabilities.inject).toBe(true);
       expect(options.capabilities.eval).toBe(true);
       expect(options.capabilities.debug).toBe(true);
       expect(options.inject).toBe(true);
@@ -135,7 +143,6 @@ describe('CLI', () => {
       expect(options.port).toBe(3099);
       expect(options.host).toBe('localhost');
       expect(options.open).toBe(false);
-      expect(options.watch).toBe(false);
       expect(options.interactive).toBe(false);
       expect(options.inject).toBe(false);
       expect(options.eval).toBe(false);
@@ -156,9 +163,8 @@ describe('CLI', () => {
       const options = parseArgs([
         '-p', '8000',
         '-o',
-        '-w',
         '-i',
-        '--inject',
+        '--eval',
         '--debug',
         '--write',
         './server.js',
@@ -168,9 +174,9 @@ describe('CLI', () => {
 
       expect(options.port).toBe(8000);
       expect(options.open).toBe(true);
-      expect(options.watch).toBe(true);
       expect(options.interactive).toBe(true);
-      expect(options.inject).toBe(true);
+      expect(options.inject).toBe(true);  // implied by --eval
+      expect(options.eval).toBe(true);
       expect(options.debug).toBe(true);
       expect(options.capabilities.writeFiles).toBe(true);
       expect(options.entry).toBe('./server.js');
@@ -186,7 +192,6 @@ describe('CLI', () => {
         port: 3099,
         host: 'localhost',
         open: false,
-        watch: false,
         interactive: false,
         inject: false,
         eval: false,
@@ -218,7 +223,6 @@ describe('CLI', () => {
         port: 3099,
         host: 'localhost',
         open: false,
-        watch: false,
         interactive: true,
         inject: false,
         eval: false,
@@ -243,38 +247,6 @@ describe('CLI', () => {
       expect(prompt).toContain('send_input');
     });
 
-    it('includes injection mode instructions', () => {
-      const pm = new ProcessManager({ entry: '/app/test.js', inject: true });
-      const options = {
-        entry: '/app/test.js',
-        port: 3099,
-        host: 'localhost',
-        open: false,
-        watch: false,
-        interactive: false,
-        inject: true,
-        eval: false,
-        debug: false,
-        sandbox: false,
-        capabilities: {
-          readFiles: true,
-          writeFiles: false,
-          shellAccess: false,
-          restart: true,
-          inject: true,
-          eval: false,
-          debug: false
-        },
-        nodeArgs: [],
-        appArgs: []
-      } as CliOptions;
-
-      const prompt = buildSystemPrompt(pm, options);
-
-      expect(prompt).toContain('INJECTION MODE');
-      expect(prompt).toContain('process.reflexive');
-    });
-
     it('includes eval mode instructions', () => {
       const pm = new ProcessManager({ entry: '/app/test.js', inject: true, eval: true });
       const options = {
@@ -282,7 +254,6 @@ describe('CLI', () => {
         port: 3099,
         host: 'localhost',
         open: false,
-        watch: false,
         interactive: false,
         inject: true,
         eval: true,
@@ -314,7 +285,6 @@ describe('CLI', () => {
         port: 3099,
         host: 'localhost',
         open: false,
-        watch: false,
         interactive: false,
         inject: false,
         eval: false,
@@ -374,32 +344,19 @@ describe('CLI', () => {
       expect(tools).toContain('start_process');
     });
 
-    it('includes inject tools when enabled', () => {
+    it('includes eval tools when enabled (includes injection tools)', () => {
       const tools = getAllowedTools({
         readFiles: true,
         writeFiles: false,
         shellAccess: false,
         restart: false,
-        inject: true,
-        eval: false,
-        debug: false
-      });
-
-      expect(tools).toContain('get_injected_state');
-      expect(tools).toContain('get_injection_logs');
-    });
-
-    it('includes eval tools when enabled', () => {
-      const tools = getAllowedTools({
-        readFiles: true,
-        writeFiles: false,
-        shellAccess: false,
-        restart: false,
-        inject: false,
         eval: true,
         debug: false
       });
 
+      // Eval now includes injection, so we get both sets of tools
+      expect(tools).toContain('get_injected_state');
+      expect(tools).toContain('get_injection_logs');
       expect(tools).toContain('evaluate_in_app');
       expect(tools).toContain('list_app_globals');
     });
@@ -410,7 +367,6 @@ describe('CLI', () => {
         writeFiles: false,
         shellAccess: false,
         restart: false,
-        inject: false,
         eval: false,
         debug: true
       });
@@ -435,7 +391,6 @@ describe('CLI', () => {
         writeFiles: true,
         shellAccess: true,
         restart: true,
-        inject: true,
         eval: true,
         debug: true
       });
@@ -444,9 +399,8 @@ describe('CLI', () => {
       expect(tools).toContain('get_process_state');
       // Restart tools
       expect(tools).toContain('restart_process');
-      // Inject tools
+      // Eval tools (includes injection tools)
       expect(tools).toContain('get_injected_state');
-      // Eval tools
       expect(tools).toContain('evaluate_in_app');
       // Debug tools
       expect(tools).toContain('debug_set_breakpoint');
