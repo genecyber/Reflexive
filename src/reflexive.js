@@ -167,127 +167,6 @@ function getDashboardHTML(options = {}) {
         document.getElementById('start-btn').disabled = state.isRunning;
         document.getElementById('stop-btn').disabled = !state.isRunning;` : '';
 
-  const breakpointScript = showControls && inject ? `
-    const breakNowBtn = document.getElementById('break-now-btn');
-    const resumeBtn = document.getElementById('resume-btn');
-    const breakpointsContent = document.getElementById('breakpoints-content');
-    const breakpointsCount = document.getElementById('breakpoints-count');
-    let isAtBreakpoint = false;
-    const breakpointHistory = [];
-
-    breakNowBtn.onclick = async () => {
-      breakNowBtn.disabled = true;
-      await fetch('/break', { method: 'POST' });
-    };
-
-    resumeBtn.onclick = async () => {
-      await fetch('/resume', { method: 'POST' });
-    };
-
-    let conditionalBreakpoints = [];
-
-    function renderBreakpoints(currentBp) {
-      // Show debug panels if we have any breakpoints
-      if (breakpointHistory.length > 0 || currentBp || conditionalBreakpoints.length > 0) {
-        debugPanels.classList.add('visible');
-      }
-
-      const activeCount = (currentBp ? 1 : 0) + conditionalBreakpoints.filter(b => b.enabled).length;
-      breakpointsCount.textContent = activeCount;
-
-      if (breakpointHistory.length === 0 && !currentBp && conditionalBreakpoints.length === 0) {
-        breakpointsContent.innerHTML = '<div class="debug-empty">No breakpoints. Ask the agent to set one.</div>';
-        return;
-      }
-
-      let html = '';
-
-      // Active breakpoint (paused)
-      if (currentBp) {
-        html += '<div class="debug-item" style="background: rgba(239, 68, 68, 0.1);">' +
-          '<input type="checkbox" checked disabled>' +
-          '<span class="pattern" style="color: #ef4444;">🔴 ' + escapeHtml(currentBp.label || 'breakpoint') + '</span>' +
-          '<span class="hit-count">paused</span>' +
-        '</div>';
-      }
-
-      // Conditional breakpoints (set by agent)
-      conditionalBreakpoints.forEach(bp => {
-        html += '<div class="debug-item' + (bp.enabled ? '' : ' disabled') + '" data-bp-id="' + bp.id + '">' +
-          '<input type="checkbox"' + (bp.enabled ? ' checked' : '') + ' title="' + (bp.enabled ? 'Disable' : 'Enable') + '">' +
-          '<span class="pattern">' + escapeHtml(bp.pattern) + '</span>' +
-          '<span class="hit-count">' + bp.hitCount + ' hits</span>' +
-          '<span class="actions">' +
-            '<button class="action-btn delete" title="Delete">✕</button>' +
-          '</span>' +
-        '</div>';
-      });
-
-      // History
-      breakpointHistory.slice().reverse().forEach(bp => {
-        html += '<div class="debug-item disabled" style="opacity: 0.5;">' +
-          '<input type="checkbox" disabled>' +
-          '<span class="pattern" style="color: #666;">' + escapeHtml(bp.label || 'breakpoint') + '</span>' +
-          '<span class="hit-count">' + bp.duration + 'ms</span>' +
-        '</div>';
-      });
-
-      breakpointsContent.innerHTML = html;
-
-      // Add event listeners for conditional breakpoints
-      breakpointsContent.querySelectorAll('.debug-item[data-bp-id]').forEach(item => {
-        const id = parseInt(item.dataset.bpId);
-
-        item.querySelector('input[type="checkbox"]').onchange = async () => {
-          await fetch('/breakpoint/' + id, { method: 'POST' });
-        };
-
-        const deleteBtn = item.querySelector('.delete');
-        if (deleteBtn) {
-          deleteBtn.onclick = async () => {
-            await fetch('/breakpoint/' + id, { method: 'DELETE' });
-          };
-        }
-      });
-    }
-
-    // Poll for breakpoint status
-    async function checkBreakpointStatus() {
-      try {
-        const res = await fetch('/breakpoint-status');
-        const data = await res.json();
-
-        // Update conditional breakpoints list
-        conditionalBreakpoints = data.conditionalBreakpoints || [];
-
-        if (data.paused && !isAtBreakpoint) {
-          isAtBreakpoint = true;
-          breakNowBtn.classList.add('paused');
-          breakNowBtn.disabled = true;
-          resumeBtn.disabled = false;
-          renderBreakpoints(data.breakpoint);
-        } else if (!data.paused && isAtBreakpoint) {
-          isAtBreakpoint = false;
-          breakNowBtn.classList.remove('paused');
-          breakNowBtn.disabled = false;
-          resumeBtn.disabled = true;
-          // Add to history
-          if (data.lastBreakpoint) {
-            breakpointHistory.push({
-              label: data.lastBreakpoint.label,
-              duration: data.lastBreakpoint.pauseDuration || 0
-            });
-          }
-          renderBreakpoints(null);
-        } else {
-          // Just update the conditional breakpoints display
-          renderBreakpoints(data.paused ? data.breakpoint : null);
-        }
-      } catch (e) {}
-    }
-    setInterval(checkBreakpointStatus, 1000);
-    checkBreakpointStatus();
-  ` : '';
 
   const v8DebuggerScript = showControls && debug ? `
     const v8StepOver = document.getElementById('v8-step-over');
@@ -530,11 +409,14 @@ function getDashboardHTML(options = {}) {
   <title>Reflexive</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #0a0a0f;
       color: #e0e0e0;
-      min-height: 100vh;
     }
     /* Custom scrollbars */
     ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -542,7 +424,7 @@ function getDashboardHTML(options = {}) {
     ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #444; }
     * { scrollbar-width: thin; scrollbar-color: #333 #1a1a22; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 8px 12px; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 8px 12px; height: 100%; display: flex; flex-direction: column; }
     header {
       display: flex;
       justify-content: space-between;
@@ -610,7 +492,7 @@ function getDashboardHTML(options = {}) {
     .dot.running { background: #22c55e; }
     .dot.stopped { background: #ef4444; }
 
-    .grid { display: flex; gap: 0; height: calc(100vh - 100px); }
+    .grid { display: flex; gap: 0; flex: 1; min-height: 0; }
     @media (max-width: 900px) { .grid { flex-direction: column; } }
 
     .panel {
@@ -625,12 +507,80 @@ function getDashboardHTML(options = {}) {
     .panel:first-child { flex: 1; }
     .panel:last-child { width: 380px; flex-shrink: 0; }
     .panel.collapsed { width: 42px !important; min-width: 42px; }
-    .panel.collapsed .logs-wrapper { display: none; }
+    .panel.collapsed .logs-section { display: none; }
     .panel.collapsed .metrics { display: none; }
-    .panel.collapsed .panel-header-actions { display: none; }
-    .panel.collapsed .panel-header { writing-mode: vertical-rl; text-orientation: mixed; padding: 14px 10px; border-bottom: none; justify-content: flex-start; }
-    .panel.collapsed .panel-header-toggle::before { transform: rotate(-90deg); }
+    .panel.collapsed .panel-header { display: none; }
+    .panel.collapsed .debug-panels { display: none !important; }
+    .panel.collapsed .h-resize-handle { display: none; }
     .resize-handle:has(+ .panel.collapsed) { width: 0; overflow: hidden; }
+
+    /* Collapsed drawer section labels */
+    .collapsed-sections {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      background: #16161d;
+    }
+    .panel.collapsed .collapsed-sections { display: flex; }
+    .collapsed-section-label {
+      writing-mode: vertical-rl;
+      text-orientation: mixed;
+      padding: 14px 10px;
+      font-size: 0.75rem;
+      color: #888;
+      cursor: pointer;
+      border-bottom: 1px solid #222;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .collapsed-section-label:hover { color: #fff; background: #1a1a24; }
+    .collapsed-section-label::before { content: '▶'; font-size: 0.5rem; }
+    .collapsed-section-label .section-count {
+      background: #333;
+      padding: 2px 4px;
+      border-radius: 6px;
+      font-size: 0.55rem;
+    }
+
+    /* Logs section (collapsible like debug sections) */
+    .logs-section {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .logs-section.collapsed {
+      flex: 0 0 auto;
+      overflow: visible;
+      min-height: auto;
+    }
+    .logs-section.collapsed .logs-wrapper { display: none; }
+    .logs-section.collapsed .metrics { display: none; }
+    .logs-section-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px;
+      background: #16161d;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 500;
+      user-select: none;
+      border-bottom: 1px solid #222;
+    }
+    .logs-section-header:hover { background: #1a1a24; }
+    .logs-section-header .arrow { font-size: 0.55rem; transition: transform 0.15s; }
+    .logs-section.collapsed .logs-section-header .arrow { transform: rotate(-90deg); }
+    .logs-section.collapsed .logs-section-header { border-bottom: none; }
+    .logs-section-header .header-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+    }
+    .logs-section.collapsed .logs-section-header .header-actions { display: none; }
 
     .resize-handle {
       width: 8px;
@@ -815,7 +765,7 @@ function getDashboardHTML(options = {}) {
       display: flex;
       gap: 8px;
     }
-    .log-type { width: 70px; flex-shrink: 0; color: #666; font-size: 0.65rem; }
+    .log-type { width: 85px; flex-shrink: 0; color: #666; font-size: 0.65rem; text-align: right; padding-right: 8px; }
     .log-entry.stdout .log-type, .log-entry.info .log-type { color: #22c55e; }
     .log-entry.stderr .log-type, .log-entry.error .log-type { color: #ef4444; }
     .log-entry.system .log-type, .log-entry.debug .log-type { color: #3b82f6; }
@@ -872,10 +822,6 @@ function getDashboardHTML(options = {}) {
     }
 
     .logs-wrapper { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-    .panel-header-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
-    .panel-header-toggle::before { content: '▼'; font-size: 0.6rem; transition: transform 0.2s; }
-    .panel.collapsed .panel-header-toggle::before { transform: rotate(-90deg); }
-    .panel.collapsed .panel-header { border-bottom: none; }
 
     .thinking { display: flex; gap: 4px; padding: 8px; }
     .thinking span {
@@ -1406,30 +1352,41 @@ function getDashboardHTML(options = {}) {
       <div class="resize-handle" id="resize-handle"></div>
 
       <div class="panel ${interactive ? 'collapsed' : ''}" id="output-panel">
-        <div class="panel-header">
-          <span class="panel-header-toggle" id="logs-toggle">${showControls ? 'Process Output' : 'Application Logs'}</span>
-          <div class="panel-header-actions">
-            <button class="panel-btn" id="clear-logs-btn" title="Clear logs">⌫</button>
-            <button class="panel-btn" id="pause-logs-btn" title="Pause auto-scroll">⏸</button>
-          </div>
+        <!-- Collapsed sidebar with section labels -->
+        <div class="collapsed-sections" id="collapsed-sections">
+          <div class="collapsed-section-label" data-section="logs">${showControls ? 'Process Output' : 'Application Logs'}</div>
+          ${showControls ? `<div class="collapsed-section-label" data-section="permissions">Permissions</div>` : ''}
+          <div class="collapsed-section-label" data-section="watch">Watch <span class="section-count" id="collapsed-watch-count">0</span></div>
+          ${showControls && debug ? `<div class="collapsed-section-label" data-section="v8-debugger">V8 Debugger</div>` : ''}
         </div>
-        <div class="logs-wrapper" id="logs-wrapper">
-          <div class="log-filter-bar">
-            <input class="log-filter-input" id="log-filter-input" placeholder="Filter logs..." />
-            <div class="log-filters" id="log-filters"></div>
+        <!-- Logs section (collapsible) -->
+        <div class="logs-section" id="logs-section">
+          <div class="logs-section-header" id="logs-section-header">
+            <span class="arrow">▼</span>
+            <span>${showControls ? 'Process Output' : 'Application Logs'}</span>
+            <div class="header-actions">
+              <button class="panel-btn" id="clear-logs-btn" title="Clear logs">⌫</button>
+              <button class="panel-btn" id="pause-logs-btn" title="Pause auto-scroll">⏸</button>
+            </div>
           </div>
-          <div class="logs" id="logs"></div>
-        </div>
-        <div class="metrics">
-          <div class="metric">
-            <span class="metric-label">PID:</span>
-            <span class="metric-value" id="m-pid">${status.pid || '--'}</span>
+          <div class="logs-wrapper" id="logs-wrapper">
+            <div class="log-filter-bar">
+              <input class="log-filter-input" id="log-filter-input" placeholder="Filter logs..." />
+              <div class="log-filters" id="log-filters"></div>
+            </div>
+            <div class="logs" id="logs"></div>
           </div>
-          <div class="metric">
-            <span class="metric-label">Uptime:</span>
-            <span class="metric-value" id="m-uptime">${status.uptime || 0}s</span>
+          <div class="metrics">
+            <div class="metric">
+              <span class="metric-label">PID:</span>
+              <span class="metric-value" id="m-pid">${status.pid || '--'}</span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Uptime:</span>
+              <span class="metric-value" id="m-uptime">${status.uptime || 0}s</span>
+            </div>
+            ${showControls ? `<div class="metric"><span class="metric-label">Restarts:</span><span class="metric-value" id="m-restarts">${status.restartCount || 0}</span></div>` : ''}
           </div>
-          ${showControls ? `<div class="metric"><span class="metric-label">Restarts:</span><span class="metric-value" id="m-restarts">${status.restartCount || 0}</span></div>` : ''}
         </div>
         ${showControls ? `<div class="h-resize-handle" id="h-resize-handle"></div>` : ''}
         <!-- Debug panels (Watch + Breakpoints + Permissions) -->
@@ -1484,22 +1441,6 @@ function getDashboardHTML(options = {}) {
               <div class="debug-empty" id="watch-empty">No watches. Click 👁 on a log entry to add one.</div>
             </div>
           </div>
-          ${showControls && inject ? `
-          <div class="debug-section" id="breakpoints-section">
-            <div class="debug-header" id="breakpoints-header">
-              <span class="arrow">▼</span>
-              <span>Breakpoints</span>
-              <span class="count" id="breakpoints-count">0</span>
-              <div class="breakpoint-controls">
-                <button class="bp-ctrl-btn" id="break-now-btn" title="Break now (pause execution)">⏸ Break</button>
-                <button class="bp-ctrl-btn resume" id="resume-btn" title="Resume execution" disabled>▶ Resume</button>
-              </div>
-            </div>
-            <div class="debug-content" id="breakpoints-content">
-              <div class="debug-empty" id="breakpoints-empty">No breakpoints hit yet.</div>
-            </div>
-          </div>
-          ` : ''}
           ${showControls && debug ? `
           <div class="debug-section" id="v8-debugger-section">
             <div class="debug-header" id="v8-debugger-header">
@@ -1586,7 +1527,9 @@ function getDashboardHTML(options = {}) {
     const stopBtn = document.getElementById('stop-response');
     const logsEl = document.getElementById('logs');
     const outputPanel = document.getElementById('output-panel');
-    const logsToggle = document.getElementById('logs-toggle');
+    const logsSection = document.getElementById('logs-section');
+    const logsSectionHeader = document.getElementById('logs-section-header');
+    const collapsedSections = document.getElementById('collapsed-sections');
     const logFiltersEl = document.getElementById('log-filters');
     const clearLogsBtn = document.getElementById('clear-logs-btn');
     const pauseLogsBtn = document.getElementById('pause-logs-btn');
@@ -1795,6 +1738,9 @@ function getDashboardHTML(options = {}) {
     function renderWatches() {
       const enabledCount = watches.filter(w => w.enabled).length;
       watchCount.textContent = enabledCount;
+      // Update collapsed sidebar count
+      const collapsedWatchCount = document.getElementById('collapsed-watch-count');
+      if (collapsedWatchCount) collapsedWatchCount.textContent = enabledCount;
       debugPanels.classList.toggle('visible', watches.length > 0);
 
       if (watches.length === 0) {
@@ -1845,26 +1791,21 @@ function getDashboardHTML(options = {}) {
     document.getElementById('permissions-header').onclick = () => {
       document.getElementById('permissions-header').classList.toggle('collapsed');
       document.getElementById('permissions-content').classList.toggle('collapsed');
+      toggleSection('permissions');
     };
     ` : ''}
     watchHeader.onclick = () => {
       watchHeader.classList.toggle('collapsed');
       document.getElementById('watch-content').classList.toggle('collapsed');
+      toggleSection('watch');
     };
-    ${showControls && inject ? `
-    document.getElementById('breakpoints-header').onclick = (e) => {
-      // Don't collapse if clicking on control buttons
-      if (e.target.closest('.breakpoint-controls')) return;
-      document.getElementById('breakpoints-header').classList.toggle('collapsed');
-      document.getElementById('breakpoints-content').classList.toggle('collapsed');
-    };
-    ` : ''}
     ${showControls && debug ? `
     document.getElementById('v8-debugger-header').onclick = (e) => {
       // Don't collapse if clicking on control buttons
       if (e.target.closest('.breakpoint-controls')) return;
       document.getElementById('v8-debugger-header').classList.toggle('collapsed');
       document.getElementById('v8-debugger-content').classList.toggle('collapsed');
+      toggleSection('v8-debugger');
     };
     ` : ''}
 
@@ -2031,8 +1972,78 @@ function getDashboardHTML(options = {}) {
       return null;
     }
 
-    // Toggle output panel collapse
-    logsToggle.onclick = () => outputPanel.classList.toggle('collapsed');
+    // Section collapse tracking
+    // In interactive mode, start with all sections collapsed
+    const startCollapsed = ${interactive};
+    const sectionStates = {
+      logs: startCollapsed,
+      permissions: startCollapsed,
+      watch: startCollapsed,
+      'v8-debugger': startCollapsed
+    };
+
+    // If starting collapsed, apply collapsed state to all section elements
+    if (startCollapsed) {
+      logsSection.classList.add('collapsed');
+      document.getElementById('permissions-header')?.classList.add('collapsed');
+      document.getElementById('permissions-content')?.classList.add('collapsed');
+      watchHeader.classList.add('collapsed');
+      document.getElementById('watch-content').classList.add('collapsed');
+      document.getElementById('v8-debugger-header')?.classList.add('collapsed');
+      document.getElementById('v8-debugger-content')?.classList.add('collapsed');
+    }
+
+    function checkAllSectionsCollapsed() {
+      const relevantSections = ['logs', 'watch'];
+      ${showControls ? `relevantSections.push('permissions');` : ''}
+      ${showControls && debug ? `relevantSections.push('v8-debugger');` : ''}
+      return relevantSections.every(s => sectionStates[s]);
+    }
+
+    function updateDrawerCollapse() {
+      if (checkAllSectionsCollapsed()) {
+        outputPanel.classList.add('collapsed');
+      } else {
+        outputPanel.classList.remove('collapsed');
+      }
+    }
+
+    function expandSection(sectionName) {
+      sectionStates[sectionName] = false;
+      if (sectionName === 'logs') {
+        logsSection.classList.remove('collapsed');
+      } else if (sectionName === 'permissions') {
+        document.getElementById('permissions-header')?.classList.remove('collapsed');
+        document.getElementById('permissions-content')?.classList.remove('collapsed');
+      } else if (sectionName === 'watch') {
+        watchHeader.classList.remove('collapsed');
+        document.getElementById('watch-content').classList.remove('collapsed');
+      } else if (sectionName === 'v8-debugger') {
+        document.getElementById('v8-debugger-header')?.classList.remove('collapsed');
+        document.getElementById('v8-debugger-content')?.classList.remove('collapsed');
+      }
+      updateDrawerCollapse();
+    }
+
+    function toggleSection(sectionName) {
+      sectionStates[sectionName] = !sectionStates[sectionName];
+      updateDrawerCollapse();
+    }
+
+    // Logs section toggle
+    logsSectionHeader.onclick = (e) => {
+      if (e.target.closest('.header-actions')) return;
+      logsSection.classList.toggle('collapsed');
+      toggleSection('logs');
+    };
+
+    // Collapsed sidebar click handlers
+    collapsedSections.querySelectorAll('.collapsed-section-label').forEach(label => {
+      label.onclick = () => {
+        const sectionName = label.dataset.section;
+        expandSection(sectionName);
+      };
+    });
 
     // Resize handle
     const resizeHandle = document.getElementById('resize-handle');
@@ -2153,6 +2164,29 @@ function getDashboardHTML(options = {}) {
       pauseLogsBtn.title = isPaused ? 'Resume auto-scroll' : 'Pause auto-scroll';
       pauseLogsBtn.classList.toggle('active', isPaused);
     };
+
+    // Auto-pause when user scrolls up, auto-resume when at bottom
+    let userScrolling = false;
+    logsEl.addEventListener('scroll', () => {
+      const atBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 20;
+      if (atBottom && isPaused && !userScrolling) {
+        // User scrolled to bottom - resume auto-scroll
+        isPaused = false;
+        pauseLogsBtn.textContent = '⏸';
+        pauseLogsBtn.title = 'Pause auto-scroll';
+        pauseLogsBtn.classList.remove('active');
+      } else if (!atBottom && !isPaused) {
+        // User scrolled up - pause auto-scroll
+        isPaused = true;
+        pauseLogsBtn.textContent = '▶';
+        pauseLogsBtn.title = 'Resume auto-scroll';
+        pauseLogsBtn.classList.add('active');
+      }
+    });
+
+    // Track manual scrolls vs programmatic scrolls
+    logsEl.addEventListener('wheel', () => { userScrolling = true; setTimeout(() => { userScrolling = false; }, 100); });
+    logsEl.addEventListener('touchmove', () => { userScrolling = true; setTimeout(() => { userScrolling = false; }, 100); });
 
     marked.setOptions({ breaks: true, gfm: true });
 
@@ -2637,8 +2671,6 @@ function getDashboardHTML(options = {}) {
 
     ${controlsScript}
 
-    ${breakpointScript}
-
     ${v8DebuggerScript}
 
     function getLogCategory(type) {
@@ -2721,8 +2753,10 @@ function getDashboardHTML(options = {}) {
         const colorStyle = isInject ? ' style="color:' + getInjectColor(l.type) + '"' : '';
         const watch = getWatchForMessage(l.message);
         const watchClass = watch ? ' watched' : '';
+        // Remove "inject:" prefix for display
+        const displayType = isInject ? l.type.replace('inject:', '') : l.type;
         return '<div class="log-entry ' + baseClass + '" data-category="' + l.type + '" data-idx="' + idx + '">' +
-          '<span class="log-type"' + colorStyle + '>' + l.type + '</span>' +
+          '<span class="log-type"' + colorStyle + '>' + displayType + '</span>' +
           '<span class="log-message">' + ansiToHtml(l.message) + '</span>' +
           '<span class="watch-icon' + watchClass + '" title="Add watch trigger">👁</span></div>';
       }).join(''), { ADD_ATTR: ['data-idx', 'data-category'] });
@@ -3431,12 +3465,6 @@ class ProcessManager {
     // Eval callbacks
     this.evalCallbacks = new Map();
     this.evalIdCounter = 0;
-    // Breakpoint state (legacy pattern-based)
-    this.activeBreakpoint = null;
-    this.lastBreakpoint = null;
-    // Conditional breakpoints (legacy pattern-based)
-    this.conditionalBreakpoints = [];
-    this.conditionalBreakpointIdCounter = 0;
     // V8 Inspector debugging
     this.debug = options.debug || false;
     this.debugger = null;
@@ -3619,10 +3647,6 @@ class ProcessManager {
     if (this.logs.length > this.maxLogs) {
       this.logs.shift();
     }
-    // Check conditional breakpoints (but not for breakpoint-related logs to avoid loops)
-    if (!type.includes('breakpoint')) {
-      this.checkConditionalBreakpoints(message);
-    }
   }
 
   _handleInjectedMessage(msg) {
@@ -3721,39 +3745,6 @@ class ProcessManager {
         this.emit('globalsResponse', data);
         break;
 
-      case 'breakpoint':
-        // Breakpoint hit or resumed
-        if (data.action === 'hit') {
-          this.activeBreakpoint = {
-            id: data.id,
-            label: data.label,
-            context: data.context,
-            stack: data.stack,
-            state: data.state,
-            timestamp: timestamp || Date.now()
-          };
-          this._log('inject:breakpoint', `🔴 BREAKPOINT HIT [${data.label}]`);
-          this._log('inject:breakpoint', `Context: ${JSON.stringify(data.context)}`);
-          if (data.stack) {
-            this._log('inject:breakpoint', `Stack:\n${data.stack}`);
-          }
-          this.emit('breakpointHit', this.activeBreakpoint);
-        } else if (data.action === 'resumed') {
-          this._log('inject:breakpoint', `🟢 RESUMED [${data.label}] after ${data.pauseDuration}ms`);
-          this.lastBreakpoint = { label: data.label, pauseDuration: data.pauseDuration };
-          this.activeBreakpoint = null;
-          this.emit('breakpointResumed', data);
-        }
-        break;
-
-      case 'breakpointError':
-        this._log('inject:breakpoint', `Breakpoint error: ${data.error}`);
-        break;
-
-      case 'activeBreakpointResponse':
-        this.emit('activeBreakpointResponse', data);
-        break;
-
       default:
         this._log('inject:unknown', `Unknown message type: ${type}`);
     }
@@ -3810,80 +3801,6 @@ class ProcessManager {
 
   getInjectedState() {
     return { ...this.injectedState };
-  }
-
-  getActiveBreakpoint() {
-    return this.activeBreakpoint;
-  }
-
-  resumeBreakpoint(returnValue) {
-    if (!this.activeBreakpoint) {
-      return false;
-    }
-    if (this.inject && this.child && this.injectionReady) {
-      try {
-        this.child.send({ reflexive: true, type: 'resumeBreakpoint', returnValue });
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-    return false;
-  }
-
-  triggerBreakpoint(label = 'remote') {
-    if (this.inject && this.child && this.injectionReady) {
-      try {
-        this.child.send({ reflexive: true, type: 'triggerBreakpoint', label });
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-    return false;
-  }
-
-  // Conditional breakpoints
-  addConditionalBreakpoint(pattern, label, enabled = true) {
-    const bp = {
-      id: ++this.conditionalBreakpointIdCounter,
-      pattern,
-      label,
-      enabled,
-      hitCount: 0,
-      createdAt: Date.now()
-    };
-    this.conditionalBreakpoints.push(bp);
-    return bp;
-  }
-
-  getConditionalBreakpoints() {
-    return [...this.conditionalBreakpoints];
-  }
-
-  removeConditionalBreakpoint(id) {
-    const idx = this.conditionalBreakpoints.findIndex(bp => bp.id === id);
-    if (idx !== -1) {
-      this.conditionalBreakpoints.splice(idx, 1);
-      return true;
-    }
-    return false;
-  }
-
-  checkConditionalBreakpoints(logMessage) {
-    // Don't check if already at a breakpoint
-    if (this.activeBreakpoint) return null;
-
-    for (const bp of this.conditionalBreakpoints) {
-      if (!bp.enabled) continue;
-      if (logMessage.toLowerCase().includes(bp.pattern.toLowerCase())) {
-        bp.hitCount++;
-        // Trigger the breakpoint
-        this.triggerBreakpoint(bp.label);
-        return bp;
-      }
-    }
-    return null;
   }
 
   // V8 Inspector debugging methods
@@ -4546,201 +4463,6 @@ function createCliMcpServer(processManager, options) {
               }]
             };
           }
-        }
-      ),
-
-      tool(
-        'get_active_breakpoint',
-        'Check if the app is paused at a breakpoint. Returns breakpoint info including label, context, and stack trace.',
-        {},
-        async () => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
-              }]
-            };
-          }
-          const bp = processManager.getActiveBreakpoint();
-          if (bp) {
-            return {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  paused: true,
-                  breakpoint: bp
-                }, null, 2)
-              }]
-            };
-          }
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ paused: false }, null, 2)
-            }]
-          };
-        }
-      ),
-
-      tool(
-        'resume_breakpoint',
-        'Resume execution from a paused breakpoint. Optionally provide a return value that will be returned from the breakpoint() call.',
-        {
-          returnValue: z.any().optional().describe('Optional value to return from the breakpoint')
-        },
-        async ({ returnValue }) => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag.'
-              }]
-            };
-          }
-          const bp = processManager.getActiveBreakpoint();
-          if (!bp) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'No active breakpoint to resume.'
-              }]
-            };
-          }
-          processManager.resumeBreakpoint(returnValue);
-          return {
-            content: [{
-              type: 'text',
-              text: `Resumed from breakpoint [${bp.label}]. Execution continuing.`
-            }]
-          };
-        }
-      ),
-
-      tool(
-        'trigger_breakpoint',
-        'Trigger a breakpoint to pause app execution immediately. The app will pause at the next opportunity and you can then inspect state with get_active_breakpoint. Use resume_breakpoint to continue.',
-        {
-          label: z.string().optional().describe('Label for this breakpoint (e.g., "debug-login", "inspect-state")')
-        },
-        async ({ label }) => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
-              }]
-            };
-          }
-          if (processManager.getActiveBreakpoint()) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Already paused at a breakpoint. Use resume_breakpoint first.'
-              }]
-            };
-          }
-          processManager.triggerBreakpoint(label || 'agent-triggered');
-          return {
-            content: [{
-              type: 'text',
-              text: `Breakpoint triggered with label "${label || 'agent-triggered'}". The app will pause at the next opportunity. Use get_active_breakpoint to check status and inspect context.`
-            }]
-          };
-        }
-      ),
-
-      tool(
-        'set_conditional_breakpoint',
-        'Set a breakpoint that triggers when a specific log pattern appears. When the app logs a message matching the pattern, execution will pause automatically. Use list_breakpoints to see active breakpoints.',
-        {
-          pattern: z.string().describe('Log pattern to match (case-insensitive substring match). E.g., "login failed", "error", "POST /api"'),
-          label: z.string().optional().describe('Label for this breakpoint'),
-          enabled: z.boolean().optional().describe('Whether the breakpoint is enabled (default true)')
-        },
-        async ({ pattern, label, enabled = true }) => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
-              }]
-            };
-          }
-          const bp = processManager.addConditionalBreakpoint(pattern, label || pattern, enabled);
-          return {
-            content: [{
-              type: 'text',
-              text: `Conditional breakpoint set:\n  ID: ${bp.id}\n  Pattern: "${pattern}"\n  Label: "${bp.label}"\n  Enabled: ${bp.enabled}\n\nThe app will pause when a log message matches this pattern.`
-            }]
-          };
-        }
-      ),
-
-      tool(
-        'list_breakpoints',
-        'List all conditional breakpoints that have been set.',
-        {},
-        async () => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
-              }]
-            };
-          }
-          const breakpoints = processManager.getConditionalBreakpoints();
-          if (breakpoints.length === 0) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'No conditional breakpoints set. Use set_conditional_breakpoint to add one.'
-              }]
-            };
-          }
-          const list = breakpoints.map(bp =>
-            `  [${bp.id}] ${bp.enabled ? '●' : '○'} "${bp.pattern}" (${bp.hitCount} hits)`
-          ).join('\n');
-          return {
-            content: [{
-              type: 'text',
-              text: `Conditional breakpoints:\n${list}`
-            }]
-          };
-        }
-      ),
-
-      tool(
-        'remove_breakpoint',
-        'Remove a conditional breakpoint by ID.',
-        {
-          id: z.number().describe('Breakpoint ID to remove')
-        },
-        async ({ id }) => {
-          if (!options.inject) {
-            return {
-              content: [{
-                type: 'text',
-                text: 'Injection not enabled. Run with --inject flag to use breakpoints.'
-              }]
-            };
-          }
-          const removed = processManager.removeConditionalBreakpoint(id);
-          if (removed) {
-            return {
-              content: [{
-                type: 'text',
-                text: `Breakpoint ${id} removed.`
-              }]
-            };
-          }
-          return {
-            content: [{
-              type: 'text',
-              text: `Breakpoint ${id} not found.`
-            }]
-          };
         }
       ),
 
@@ -5829,72 +5551,6 @@ async function startCliDashboard(processManager, options) {
         res.end(JSON.stringify({ success: true }));
         await processManager.stop();
         process.exit(0);
-      }
-
-      // Breakpoint controls (only when inject is enabled)
-      if (pathname === '/break' && req.method === 'POST') {
-        if (options.inject && processManager.injectionReady) {
-          processManager.triggerBreakpoint();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true }));
-        } else {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Injection not enabled or not ready' }));
-        }
-        return;
-      }
-
-      if (pathname === '/resume' && req.method === 'POST') {
-        if (options.inject && processManager.getActiveBreakpoint()) {
-          processManager.resumeBreakpoint();
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true }));
-        } else {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'No active breakpoint' }));
-        }
-        return;
-      }
-
-      if (pathname === '/breakpoint-status') {
-        const bp = processManager.getActiveBreakpoint();
-        const lastBp = processManager.lastBreakpoint;
-        const conditionalBps = processManager.getConditionalBreakpoints();
-        // Clear lastBreakpoint after reading so we only get it once
-        processManager.lastBreakpoint = null;
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          paused: !!bp,
-          breakpoint: bp || null,
-          lastBreakpoint: lastBp || null,
-          conditionalBreakpoints: conditionalBps
-        }));
-        return;
-      }
-
-      // Toggle conditional breakpoint enabled state
-      if (pathname.startsWith('/breakpoint/') && req.method === 'POST') {
-        const id = parseInt(pathname.split('/')[2]);
-        const bps = processManager.getConditionalBreakpoints();
-        const bp = bps.find(b => b.id === id);
-        if (bp) {
-          bp.enabled = !bp.enabled;
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, enabled: bp.enabled }));
-        } else {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Breakpoint not found' }));
-        }
-        return;
-      }
-
-      // Delete conditional breakpoint
-      if (pathname.startsWith('/breakpoint/') && req.method === 'DELETE') {
-        const id = parseInt(pathname.split('/')[2]);
-        const removed = processManager.removeConditionalBreakpoint(id);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: removed }));
-        return;
       }
 
       // V8 Inspector debugging endpoints (only when --debug is enabled)

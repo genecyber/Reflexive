@@ -67,3 +67,13 @@
 - [ ] Multi-session support with tabs (detect existing server, add session)
 - [ ] Chat history persistence to disk
 - [ ] Export conversation as markdown
+
+## Recently Completed
+
+- [x] **Aggregated Watch Trigger Queue** - Prevent runaway agent calls from rapid log matches
+  - Queues triggers by pattern instead of dropping them
+  - Same pattern aggregates: "foo event" triggers 20x → single queue entry with count + timestamps
+  - Processes one aggregate at a time when agent finishes responding
+  - Agent sees: `Pattern "heartbeat" matched (triggered 20x)` with timestamp array
+  - FIFO order preserved by when pattern first appeared
+  - Continues processing queue until empty

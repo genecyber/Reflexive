@@ -1,24 +1,37 @@
 {
   "name": "reflexive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AI-powered introspection for Node.js apps. Monitor external processes or instrument your own with Claude Agent SDK.",
   "type": "module",
-  "main": "./src/reflexive.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "bin": {
-    "reflexive": "./src/reflexive.js"
+    "reflexive": "./dist/cli.js",
+    "reflexive-legacy": "./src/reflexive.js"
   },
   "exports": {
-    ".": "./src/reflexive.js",
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
     "./inject": "./src/inject.cjs"
   },
   "scripts": {
-    "demo": "node demo-instrumented.js",
-    "demo:app": "node src/reflexive.js demo-app.js",
-    "demo:inject": "node src/reflexive.js --inject demo-inject.js",
-    "demo:eval": "node src/reflexive.js --eval demo-inject.js",
-    "demo:debug": "node src/reflexive.js --debug demo-app.js",
-    "demo:ai": "node demo-ai-features.js",
-    "demo:ai:inject": "node src/reflexive.js --inject demo-ai-features.js"
+    "build": "tsc -p tsconfig.build.json",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
+    "build:all": "npm run build && npm run build:dashboard",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "prebuild": "npm run clean",
+    "demo": "npm run build && node dist/cli.js demo-app.js --dangerously-skip-permissions",
+    "demo:sandbox": "npm run build && node dist/cli.js --sandbox demo-app.js",
+    "demo:legacy": "node src/reflexive.js demo-app.js",
+    "prepublishOnly": "npm run build:all && npm run test"
   },
   "keywords": [
     "ai",
@@ -31,17 +44,41 @@
     "llm",
     "claude-code",
     "claude-agent-sdk",
-    "cli"
+    "cli",
+    "sandbox"
   ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.0",
-    "express": "^5.2.1",
+    "@anthropic-ai/sdk": "^0.71.2",
+    "ms": "^2.1.3",
     "ws": "^8.19.0",
     "zod": "^3.24.1"
   },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/ms": "^2.1.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "@vitest/coverage-v8": "^2.1.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.1.0"
+  },
+  "optionalDependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@vercel/sandbox": "^1.0.2"
+  },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "src/reflexive.js",
+    "src/inject.cjs",
+    "dashboard/out",
+    "logo-carbon.png"
+  ]
 }
