@@ -106,6 +106,8 @@ reflexive [options] [entry-file] [-- app-args...]
 -o, --open              Open dashboard in browser
 -w, --watch             Restart on file changes
 -i, --interactive       Proxy stdin/stdout for CLI apps
+    --mcp               Run as MCP server for external AI agents
+    --no-webui          Disable web dashboard (MCP mode only)
     --inject            Deep instrumentation
     --eval              Runtime eval (DANGEROUS)
 -d, --debug             V8 Inspector debugging
@@ -130,21 +132,134 @@ npx reflexive --debug ./server.js
 # Deep instrumentation - GC stats, event loop, HTTP tracking
 npx reflexive --inject ./server.js
 
+# MCP server - let Claude Code or other AI agents control your app
+npx reflexive --mcp --write --shell ./server.js
+
 # Pass args to your app
 npx reflexive ./server.js -- --port 8080
 ```
 
+## MCP Server Mode
+
+Run reflexive as an MCP server that external AI agents can connect to. This lets you control your app from Claude Code, Claude Desktop, ChatGPT, or any MCP-compatible client.
+
+The MCP server can run with or without a pre-specified app - use the `run_app` tool to dynamically start or switch between different Node.js applications.
+
+```bash
+# Start with a specific app
+npx reflexive --mcp --write ./app.js
+
+# Start without an app (use run_app tool to start apps dynamically)
+npx reflexive --mcp --write
+
+# With file writing and shell access
+npx reflexive --mcp --write --shell ./app.js
+
+# With debugging (breakpoints, stepping, scope inspection)
+npx reflexive --mcp --write --debug ./app.js
+
+# Without web dashboard
+npx reflexive --mcp --no-webui ./app.js
+```
+
+### Claude Code Integration
+
+```bash
+# Add reflexive as an MCP server (no app - use run_app tool)
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --shell
+
+# With debugging support (breakpoints, stepping, scope inspection)
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --shell --debug
+
+# Or with a specific app
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write ./app.js
+```
+
+Or add to your Claude Code project settings (`.mcp.json`):
+
+```json
+{
+  "reflexive": {
+    "command": "npx",
+    "args": ["reflexive", "--mcp", "--write", "--shell", "--debug"]
+  }
+}
+```
+
+### Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "reflexive": {
+      "command": "npx",
+      "args": ["reflexive", "--mcp", "--write", "--debug"]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+When running as an MCP server, these tools are available to connected agents:
+
+| Tool | Description |
+|------|-------------|
+| `run_app` | Start or switch to a different Node.js app |
+| `get_process_state` | Get app status (PID, uptime, running state) |
+| `get_output_logs` | Get stdout/stderr logs |
+| `restart_process` | Restart the app |
+| `stop_process` | Stop the app |
+| `start_process` | Start a stopped app |
+| `send_input` | Send stdin to interactive apps |
+| `search_logs` | Search through logs |
+| `read_file` | Read project files |
+| `list_directory` | List directory contents |
+| `write_file` | Write files (requires `--write`) |
+| `edit_file` | Edit files (requires `--write`) |
+| `exec_shell` | Run shell commands (requires `--shell`) |
+| `chat` | Chat with embedded Reflexive agent |
+| `reflexive_self_knowledge` | Get Reflexive documentation |
+
+With `--debug`: `debug_set_breakpoint`, `debug_resume`, `debug_step_*`, etc.
+With `--eval`: `evaluate_in_app`, `list_app_globals`
+
+### Dynamic App Switching
+
+The `run_app` tool allows switching between different apps without restarting the MCP server:
+
+```
+Agent: [run_app: path="./server.js"]
+       Started: /path/to/server.js
+
+Agent: [run_app: path="./worker.js", args=["--queue", "tasks"]]
+       Started: /path/to/worker.js with args: --queue tasks
+```
+
+The web dashboard also supports file picking to switch apps via the browser's File System Access API.
+
+---
+
 ## Library Mode
 
-Embed the agent inside your app for deeper introspection:
+Embed the agent inside your app for deeper introspection.
+
+**Note:** Web UI is disabled by default for security. The `chat()` function works regardless.
 
 ```javascript
 import { makeReflexive } from 'reflexive';
 
+// Minimal - no web UI, just programmatic chat
+const r = makeReflexive({ title: 'My App' });
+
+// With web dashboard enabled
 const r = makeReflexive({
+  webUI: true,     // Enable web dashboard (off by default)
   port: 3099,
   title: 'My App',
-  tools: []  // Add custom MCP tools
+  tools: []        // Add custom MCP tools
 });
 
 // Console output captured automatically
@@ -154,7 +269,7 @@ console.log('Server started');
 r.setState('activeUsers', 42);
 r.setState('cache.hitRate', 0.95);
 
-// Programmatic chat
+// Programmatic chat (works with or without webUI)
 const answer = await r.chat("What's the memory usage?");
 ```
 

@@ -4,6 +4,10 @@ Complete API documentation for Reflexive library mode, REST API, and TypeScript 
 
 ## Table of Contents
 
+- [MCP Server Mode](#mcp-server-mode)
+  - [Starting the MCP Server](#starting-the-mcp-server)
+  - [Connecting from AI Clients](#connecting-from-ai-clients)
+  - [MCP Server Tools](#mcp-server-tools)
 - [Library API](#library-api)
   - [makeReflexive()](#makereflexive)
   - [ReflexiveInstance](#reflexiveinstance)
@@ -31,13 +35,189 @@ Complete API documentation for Reflexive library mode, REST API, and TypeScript 
   - [MCP Types](#mcp-types)
 - [Events](#events)
 
+## MCP Server Mode
+
+Run Reflexive as a stdio-based MCP (Model Context Protocol) server that external AI agents can connect to. This allows Claude Code, Claude Desktop, ChatGPT with MCP support, or any MCP-compatible client to control your Node.js application.
+
+The MCP server can run with or without a pre-specified app - use the `run_app` tool to dynamically start or switch between different Node.js applications.
+
+### Starting the MCP Server
+
+```bash
+# Start without an app (use run_app tool to start apps)
+npx reflexive --mcp --write
+
+# Start with a specific app
+npx reflexive --mcp --write ./app.js
+
+# With shell access
+npx reflexive --mcp --write --shell ./app.js
+
+# With debugging (breakpoints, stepping, scope inspection)
+npx reflexive --mcp --write --shell --debug ./app.js
+
+# Full capabilities (write + shell + eval + debug)
+npx reflexive --mcp --full ./app.js
+
+# Without web dashboard (MCP only)
+npx reflexive --mcp --no-webui ./app.js
+```
+
+By default, the web dashboard is still available at `http://localhost:3099` when running in MCP mode. Use `--no-webui` to disable it.
+
+### Connecting from AI Clients
+
+#### Claude Code
+
+```bash
+# Add as MCP server (one-time setup, no app specified)
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --shell --debug
+
+# Or with a specific app
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --debug ./app.js
+```
+
+Or add to project-level `.mcp.json`:
+
+```json
+{
+  "reflexive": {
+    "command": "npx",
+    "args": ["reflexive", "--mcp", "--write", "--shell", "--debug"]
+  }
+}
+```
+
+#### Claude Desktop
+
+Add to `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "reflexive": {
+      "command": "npx",
+      "args": ["reflexive", "--mcp", "--write", "--debug"]
+    }
+  }
+}
+```
+
+#### Generic MCP Client
+
+Reflexive implements the MCP protocol over stdio. Any MCP client can connect by spawning the process:
+
+```javascript
+const { spawn } = require('child_process');
+
+// Start without an app - use run_app tool later
+const reflexive = spawn('npx', ['reflexive', '--mcp', '--write'], {
+  stdio: ['pipe', 'pipe', 'inherit']
+});
+
+// Send MCP messages via stdin
+reflexive.stdin.write(JSON.stringify({
+  jsonrpc: '2.0',
+  id: 1,
+  method: 'initialize',
+  params: { protocolVersion: '2024-11-05' }
+}) + '\n');
+
+// Receive responses via stdout
+reflexive.stdout.on('data', (data) => {
+  const response = JSON.parse(data.toString());
+  console.log(response);
+});
+```
+
+### Dynamic App Switching
+
+The `run_app` tool allows you to start or switch between different Node.js applications without restarting the MCP server:
+
+```
+Agent: [run_app: path="./server.js"]
+       Started: /path/to/server.js
+
+Agent: [run_app: path="./worker.js", args=["--queue", "tasks"]]
+       Started: /path/to/worker.js with args: --queue tasks
+```
+
+The web dashboard also supports file picking to switch apps via the browser's File System Access API.
+
+### MCP Server Tools
+
+When running as an MCP server, these tools are exposed to connected clients:
+
+#### App Control Tools
+
+| Tool | Description |
+|------|-------------|
+| `run_app` | Start or switch to a different Node.js app |
+| `get_process_state` | Get process status (PID, uptime, running state, etc.) |
+| `get_output_logs` | Get stdout/stderr output logs |
+| `restart_process` | Restart the current application |
+| `stop_process` | Stop the application |
+| `start_process` | Start a stopped application |
+| `send_input` | Send input to stdin (for interactive apps) |
+| `search_logs` | Search through process logs |
+
+#### File Tools
+
+| Tool | Description | Requires |
+|------|-------------|----------|
+| `read_file` | Read file contents | (always available) |
+| `list_directory` | List directory contents | (always available) |
+| `write_file` | Write/create a file | `--write` |
+| `edit_file` | Edit file by string replacement | `--write` |
+
+#### Shell Tool
+
+| Tool | Description | Requires |
+|------|-------------|----------|
+| `exec_shell` | Execute shell commands | `--shell` |
+
+#### Debug Tools (with `--debug`)
+
+| Tool | Description |
+|------|-------------|
+| `debug_set_breakpoint` | Set V8 debugger breakpoint |
+| `debug_remove_breakpoint` | Remove breakpoint |
+| `debug_list_breakpoints` | List all breakpoints |
+| `debug_resume` | Resume from breakpoint |
+| `debug_pause` | Pause execution |
+| `debug_step_over` | Step over current line |
+| `debug_step_into` | Step into function |
+| `debug_step_out` | Step out of function |
+| `debug_get_call_stack` | Get current call stack |
+| `debug_evaluate` | Evaluate expression at breakpoint |
+| `debug_get_scope_variables` | Get variables in scope |
+
+#### Eval Tools (with `--eval`)
+
+| Tool | Description |
+|------|-------------|
+| `evaluate_in_app` | Execute JavaScript in running app |
+| `list_app_globals` | List global variables in app |
+
+#### Other Tools
+
+| Tool | Description |
+|------|-------------|
+| `chat` | Chat with embedded Reflexive AI agent |
+| `reflexive_self_knowledge` | Get Reflexive documentation |
+
+---
+
 ## Library API
 
 ### makeReflexive()
 
 Create a Reflexive instance embedded in your application.
 
-**Important:** When your app is run via `reflexive app.js` (CLI mode), `makeReflexive()` automatically detects this and connects to the parent CLI instead of starting its own server. This allows seamless integration - your app works both standalone and with the CLI.
+**Important:**
+- Web UI is **disabled by default** for security. Enable with `webUI: true`.
+- `r.chat()` works regardless of whether web UI is enabled.
+- When your app is run via `reflexive app.js` (CLI mode), `makeReflexive()` automatically detects this and connects to the parent CLI instead of starting its own server.
 
 #### Signature
 ```typescript
@@ -47,11 +227,12 @@ function makeReflexive(options?: MakeReflexiveOptions): ReflexiveInstance
 #### Options
 ```typescript
 interface MakeReflexiveOptions {
-  port?: number;              // Dashboard port (default: 3099)
+  webUI?: boolean;            // Enable web dashboard (default: false)
+  port?: number;              // Dashboard port when webUI enabled (default: 3099)
   title?: string;             // Dashboard title (default: 'Reflexive')
   systemPrompt?: string;      // Additional system prompt for AI
   tools?: CustomTool[];       // Custom MCP tools
-  onReady?: (info: {          // Called when server starts (standalone mode only)
+  onReady?: (info: {          // Called when server starts (webUI must be true)
     port: number;
     appState: AppState;
     server: Server;
@@ -59,11 +240,27 @@ interface MakeReflexiveOptions {
 }
 ```
 
-#### Example
+#### Example: Minimal (No Web UI)
+```typescript
+import { makeReflexive } from 'reflexive';
+
+// Web UI disabled by default - just programmatic chat
+const r = makeReflexive();
+
+// Use chat programmatically
+const analysis = await r.chat('Summarize the app state');
+console.log(analysis);
+
+// Track state (visible to agent)
+r.setState('users.active', 42);
+```
+
+#### Example: With Web Dashboard
 ```typescript
 import { makeReflexive } from 'reflexive';
 
 const r = makeReflexive({
+  webUI: true,                // Enable web dashboard
   port: 3099,
   title: 'My App',
   systemPrompt: 'You are monitoring a payment processing system.',

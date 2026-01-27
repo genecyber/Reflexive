@@ -35,7 +35,54 @@ Comprehensive guide to using Reflexive for Node.js application introspection and
 
 ## Operating Modes
 
-Reflexive supports three operating modes, each suited to different use cases.
+Reflexive supports four operating modes, each suited to different use cases.
+
+### MCP Server Mode
+
+Run Reflexive as an MCP (Model Context Protocol) server that external AI agents can connect to and control.
+
+#### When to Use
+- Integration with Claude Code, Claude Desktop, or ChatGPT
+- Letting external AI agents manage your Node.js applications
+- Building multi-agent systems
+- Dynamic app switching without restarting
+
+#### Features
+- stdio-based MCP protocol
+- All CLI tools exposed to connected agents
+- Optional web dashboard alongside MCP
+- Dynamic app switching via `run_app` tool
+- Works with any MCP-compatible client
+
+#### Example
+```bash
+# Start without an app (use run_app tool)
+npx reflexive --mcp --write --shell --debug
+
+# Start with a specific app
+npx reflexive --mcp --write --debug ./server.js
+
+# Without web dashboard
+npx reflexive --mcp --no-webui ./server.js
+```
+
+#### Claude Code Integration
+```bash
+# Add as MCP server (with full capabilities)
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --shell --debug
+```
+
+Or add to `.mcp.json`:
+```json
+{
+  "reflexive": {
+    "command": "npx",
+    "args": ["reflexive", "--mcp", "--write", "--shell", "--debug"]
+  }
+}
+```
+
+See [API Reference - MCP Server Mode](./api-reference.md#mcp-server-mode) for complete documentation.
 
 ### Local Mode
 
@@ -403,6 +450,7 @@ The AI agent has access to different tools based on the operating mode:
 - `exec_shell` - Execute shell commands
 
 **Process Control**:
+- `run_app` - Start or switch to a different app (MCP mode)
 - `get_process_state` - View process status
 - `get_output_logs` - Retrieve logs
 - `search_logs` - Search log entries
@@ -793,6 +841,28 @@ This powerful combination enables both AI-native application features AND deep r
 
 One of Reflexive's most powerful features is building "hybrid" applications that use AI inline in your code via `reflexive.chat()`.
 
+#### Library Mode Defaults
+
+In library mode, **all capabilities are off by default** for security:
+
+```typescript
+import { makeReflexive } from 'reflexive';
+
+// Minimal: no web UI, just chat() functionality
+const r = makeReflexive({ title: 'My App' });
+await r.chat('Hello');  // Works without webUI
+
+// With dashboard enabled
+const r = makeReflexive({
+  webUI: true,   // Enable web dashboard (off by default)
+  port: 3099,
+  title: 'My App'
+});
+// Dashboard at http://localhost:3099/reflexive
+```
+
+The `chat()` method works regardless of `webUI` setting - you can use AI programmatically without exposing a web interface.
+
 #### The Pattern
 
 ```typescript
@@ -903,16 +973,17 @@ async function filterUsers(query) {
 Your hybrid app works in both modes:
 
 ```bash
-# Standalone - app has its own dashboard
+# Standalone with webUI enabled
 node app.js
-# Dashboard at http://localhost:3099/reflexive
+# If app has makeReflexive({ webUI: true }), dashboard at http://localhost:3099/reflexive
+# If webUI: false (default), no dashboard but chat() still works
 
-# With CLI - uses CLI's dashboard, .chat() still works
+# With CLI - CLI provides the dashboard, .chat() still works
 reflexive app.js
-# Dashboard at CLI's port, same functionality
+# Dashboard at CLI's port (3099), .chat() proxies to CLI
 ```
 
-When run via CLI, `makeReflexive()` automatically detects this and connects to the parent CLI instead of starting its own server. This is seamless - your code doesn't need to change.
+When run via CLI, `makeReflexive()` automatically detects this via `REFLEXIVE_CLI_MODE` environment variable and connects to the parent CLI instead of starting its own server. This is seamless - your code doesn't need to change.
 
 ## Troubleshooting
 

@@ -11,7 +11,7 @@
 
 import { spawn } from 'child_process';
 import { resolve, dirname, join } from 'path';
-import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, realpathSync, statSync, readdirSync } from 'fs';
 import { createInterface } from 'readline';
 import { fileURLToPath } from 'url';
 import { createServer, ServerResponse } from 'http';
@@ -24,7 +24,9 @@ import { createCliTools } from './mcp/cli-tools.js';
 import { createSandboxTools, getSandboxAllowedTools } from './mcp/sandbox-tools.js';
 import { createKnowledgeTools } from './mcp/knowledge-tools.js';
 import { parseJsonBody } from './core/http-server.js';
+import { z } from 'zod';
 import type { Capabilities } from './types/index.js';
+import type { AnyToolDefinition } from './mcp/tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -116,6 +118,8 @@ interface CliOptions {
   eval: boolean;
   debug: boolean;
   sandbox: boolean;
+  mcp: boolean;      // Run as stdio MCP server for external agents
+  mcpWebUI: boolean; // Enable webUI when in MCP mode (default: true)
   capabilities: Capabilities;
   nodeArgs: string[];
   appArgs: string[];
@@ -132,6 +136,8 @@ function parseArgs(args: string[]): CliOptions {
     eval: false,
     debug: false,
     sandbox: false,
+    mcp: false,
+    mcpWebUI: true,  // webUI on by default even in MCP mode
     capabilities: {
       readFiles: true,
       writeFiles: false,
@@ -174,6 +180,10 @@ function parseArgs(args: string[]): CliOptions {
       options.capabilities.debug = true;
     } else if (arg === '--sandbox' || arg === '-s') {
       options.sandbox = true;
+    } else if (arg === '--mcp') {
+      options.mcp = true;
+    } else if (arg === '--no-webui') {
+      options.mcpWebUI = false;
     } else if (arg === '--capabilities' || arg === '-c') {
       const caps = args[++i].split(',');
       for (const cap of caps) {
@@ -251,6 +261,8 @@ OPTIONS:
   -o, --open              Open dashboard in browser
   -i, --interactive       Interactive mode: proxy stdin/stdout through agent
   -s, --sandbox           Run in Vercel Sandbox (isolated environment)
+      --mcp               Run as stdio MCP server (for external AI agents like Claude Code)
+      --no-webui          Disable web dashboard (only applies to --mcp mode)
       --eval              Enable runtime code evaluation (includes deep instrumentation)
   -d, --debug             Enable V8 Inspector debugging (breakpoints, stepping, scope inspection)
       --inspect           Enable eval + debug (the "poke around" mode)
@@ -273,10 +285,33 @@ CAPABILITIES:
   eval           Runtime code evaluation with deep instrumentation
   debug          V8 Inspector debugging
 
+MCP SERVER MODE:
+  Run reflexive as an MCP server that external AI agents can connect to:
+
+    reflexive --mcp --write ./app.js              # Start with a specific app
+    reflexive --mcp --write                       # Start without an app (use run_app tool)
+    reflexive --mcp --write --shell --debug       # Full capabilities with debugging
+
+  Configure in Claude Code's MCP settings:
+    {
+      "mcpServers": {
+        "reflexive": {
+          "command": "npx",
+          "args": ["reflexive", "--mcp", "--write", "--shell", "--debug"]
+        }
+      }
+    }
+
+  The MCP server exposes all reflexive tools (logs, restart, files, debug, etc.)
+  Use --debug to enable breakpoint tools (set_breakpoint, resume, step_*, etc.)
+  Use the run_app tool to dynamically start or switch between different apps.
+  WebUI is still available at http://localhost:3099 unless --no-webui is specified.
+
 EXAMPLES:
   reflexive                                    # Auto-detect from package.json
   reflexive ./index.js                         # Run specific file
   reflexive --sandbox ./app.js                 # Run in isolated Vercel Sandbox
+  reflexive --mcp --write ./app.js             # Run as MCP server for external agents
   reflexive --dev ./app.js                     # Development mode (write + shell + eval)
   reflexive --inspect ./server.js              # Full introspection (eval + debug)
   reflexive --full ./server.js                 # All capabilities enabled
@@ -334,7 +369,7 @@ function buildSystemPrompt(processManager: ProcessManager, options: CliOptions):
   const state = processManager.getState();
   const parts: string[] = [
     'You are an AI assistant powered by Reflexive, controlling a Node.js process.',
-    `Entry file: ${state.entry}`,
+    state.entry ? `Entry file: ${state.entry}` : 'Entry file: (none configured - use run_app to start an app)',
     `Working directory: ${state.cwd}`,
     '',
     'SELF-KNOWLEDGE: Use `reflexive_self_knowledge` to get detailed documentation about Reflexive.',
@@ -790,6 +825,33 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         processManager.start();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true }));
+        return;
+      }
+
+      // Run a different app (for dynamic app switching from dashboard)
+      if (pathname === '/run-app' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        try {
+          const { path: appPath, args } = JSON.parse(body);
+          if (!appPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'path required' }));
+            return;
+          }
+          const absPath = resolve(process.cwd(), appPath);
+          if (!existsSync(absPath)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `File not found: ${absPath}` }));
+            return;
+          }
+          await processManager.runApp(absPath, args);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, entry: absPath }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message }));
+        }
         return;
       }
 
@@ -1281,6 +1343,17 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
 
+  // MCP mode - can run without entry file (use run_app tool to start apps)
+  if (options.mcp) {
+    // In MCP mode, if entry is specified, verify it exists
+    if (options.entry && !existsSync(options.entry)) {
+      console.log(`Creating new file: ${options.entry}\n`);
+      writeFileSync(options.entry, '// Created by Reflexive\n\nconsole.log("Hello from Reflexive!");\n');
+    }
+    await runMcpMode(options);
+    return;
+  }
+
   if (!options.entry) {
     // Try to resolve from package.json
     const resolved = await resolveEntryFromPackageJson(options);
@@ -1374,6 +1447,423 @@ Reflexive CLI
   });
 
   process.on('SIGTERM', async () => {
+    await processManager.stop();
+    processManager.destroy();
+    process.exit(0);
+  });
+}
+
+/**
+ * Create file operation tools for MCP server mode
+ */
+function createFileTools(capabilities: Capabilities): AnyToolDefinition[] {
+  const tools: AnyToolDefinition[] = [];
+
+  // Read file tool (always available)
+  if (capabilities.readFiles) {
+    tools.push({
+      name: 'read_file',
+      description: 'Read the contents of a file',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file to read (relative to cwd or absolute)')
+      }),
+      handler: async ({ path: filePath }: { path: string }) => {
+        try {
+          const absPath = resolve(process.cwd(), filePath);
+          const content = readFileSync(absPath, 'utf-8');
+          return { content: [{ type: 'text', text: content }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error reading file: ${(err as Error).message}` }], isError: true };
+        }
+      }
+    });
+
+    tools.push({
+      name: 'list_directory',
+      description: 'List contents of a directory',
+      inputSchema: z.object({
+        path: z.string().optional().describe('Path to directory (default: current working directory)')
+      }),
+      handler: async ({ path: dirPath }: { path?: string }) => {
+        try {
+          const absPath = resolve(process.cwd(), dirPath || '.');
+          const entries = readdirSync(absPath);
+          const result = entries.map(name => {
+            const entryPath = join(absPath, name);
+            try {
+              const stat = statSync(entryPath);
+              return { name, type: stat.isDirectory() ? 'directory' : 'file', size: stat.size };
+            } catch {
+              return { name, type: 'unknown', size: 0 };
+            }
+          });
+          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error listing directory: ${(err as Error).message}` }], isError: true };
+        }
+      }
+    });
+  }
+
+  // Write file tool (only if writeFiles capability)
+  if (capabilities.writeFiles) {
+    tools.push({
+      name: 'write_file',
+      description: 'Write content to a file (creates or overwrites)',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file'),
+        content: z.string().describe('Content to write')
+      }),
+      handler: async ({ path: filePath, content }: { path: string; content: string }) => {
+        try {
+          const absPath = resolve(process.cwd(), filePath);
+          writeFileSync(absPath, content, 'utf-8');
+          return { content: [{ type: 'text', text: `File written: ${absPath}` }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error writing file: ${(err as Error).message}` }], isError: true };
+        }
+      }
+    });
+
+    tools.push({
+      name: 'edit_file',
+      description: 'Edit a file by replacing a specific string',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file'),
+        old_string: z.string().describe('The exact string to replace'),
+        new_string: z.string().describe('The replacement string')
+      }),
+      handler: async ({ path: filePath, old_string, new_string }: { path: string; old_string: string; new_string: string }) => {
+        try {
+          const absPath = resolve(process.cwd(), filePath);
+          const content = readFileSync(absPath, 'utf-8');
+          if (!content.includes(old_string)) {
+            return { content: [{ type: 'text', text: `Error: old_string not found in file` }], isError: true };
+          }
+          const newContent = content.replace(old_string, new_string);
+          writeFileSync(absPath, newContent, 'utf-8');
+          return { content: [{ type: 'text', text: `File edited: ${absPath}` }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: `Error editing file: ${(err as Error).message}` }], isError: true };
+        }
+      }
+    });
+  }
+
+  return tools;
+}
+
+/**
+ * Create shell tool for MCP server mode
+ * Note: Uses execSync intentionally - this is a shell execution tool gated behind --shell flag
+ */
+function createShellTool(capabilities: Capabilities): AnyToolDefinition[] {
+  if (!capabilities.shellAccess) return [];
+
+  return [{
+    name: 'exec_shell',
+    description: 'Execute a shell command and return the output. Only available when --shell flag is enabled.',
+    inputSchema: z.object({
+      command: z.string().describe('Shell command to execute'),
+      cwd: z.string().optional().describe('Working directory for the command'),
+      timeout: z.number().optional().describe('Timeout in milliseconds (default: 30000)')
+    }),
+    handler: async ({ command, cwd, timeout }: { command: string; cwd?: string; timeout?: number }) => {
+      // Using execSync intentionally - this is a shell tool that needs full shell features
+      const { execSync } = await import('child_process');
+      try {
+        const output = execSync(command, {
+          cwd: cwd || process.cwd(),
+          timeout: timeout || 30000,
+          encoding: 'utf-8' as BufferEncoding,
+          maxBuffer: 10 * 1024 * 1024
+        });
+        return { content: [{ type: 'text', text: String(output) }] };
+      } catch (err) {
+        const error = err as { stdout?: string; stderr?: string; message: string };
+        const output = error.stdout || error.stderr || error.message;
+        return { content: [{ type: 'text', text: `Command failed: ${output}` }], isError: true };
+      }
+    }
+  }];
+}
+
+/**
+ * Create chat tool for MCP server mode - allows external agents to chat with the embedded Claude agent
+ */
+function createChatTool(
+  processManager: ProcessManager,
+  options: CliOptions,
+  mcpServer: unknown
+): AnyToolDefinition {
+  return {
+    name: 'chat',
+    description: 'Chat with the embedded Reflexive AI agent. The agent has full context of the running application, logs, and can use all enabled tools (file read/write, shell, debug, eval). The agent also has reflexive_self_knowledge for documentation.',
+    inputSchema: z.object({
+      message: z.string().describe('Message to send to the Reflexive agent')
+    }),
+    handler: async ({ message }: { message: string }) => {
+      try {
+        const state = processManager.getState();
+        const recentLogs = processManager.getLogs(10);
+        const recentOutput = `\nRecent output: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+        const contextSummary = `Process: ${state.isRunning ? 'running' : 'stopped'}, PID: ${state.pid}, uptime: ${state.uptime}s${recentOutput}`;
+
+        const chatStream = createChatStream(message, {
+          contextSummary,
+          systemPrompt: buildSystemPrompt(processManager, options),
+          mcpServer,
+          mcpServerName: 'reflexive-cli',
+          queryOptions: {
+            cwd: state.cwd,
+            allowedTools: getAllowedTools(options.capabilities)
+          }
+        });
+
+        let fullResponse = '';
+        for await (const chunk of chatStream) {
+          if (chunk.type === 'text') {
+            fullResponse += chunk.content;
+          }
+        }
+
+        return { content: [{ type: 'text', text: fullResponse }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Chat error: ${(err as Error).message}` }], isError: true };
+      }
+    }
+  };
+}
+
+/**
+ * Create run_app tool for MCP server mode - allows dynamically switching apps
+ */
+function createRunAppTool(processManager: ProcessManager): AnyToolDefinition {
+  return {
+    name: 'run_app',
+    description: 'Start or switch to a different Node.js application. Stops any currently running app and starts the new one. The app path can be relative to the current working directory or absolute.',
+    inputSchema: z.object({
+      path: z.string().describe('Path to the Node.js file to run'),
+      args: z.array(z.string()).optional().describe('Optional arguments to pass to the app')
+    }),
+    handler: async ({ path: appPath, args }: { path: string; args?: string[] }) => {
+      try {
+        const absPath = resolve(process.cwd(), appPath);
+        if (!existsSync(absPath)) {
+          return { content: [{ type: 'text', text: `Error: File not found: ${absPath}` }], isError: true };
+        }
+        await processManager.runApp(absPath, args);
+        return { content: [{ type: 'text', text: `Started: ${absPath}${args?.length ? ` with args: ${args.join(' ')}` : ''}` }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Error starting app: ${(err as Error).message}` }], isError: true };
+      }
+    }
+  };
+}
+
+/**
+ * Run as stdio MCP server for external AI agents
+ */
+async function runMcpMode(options: CliOptions): Promise<void> {
+  // Entry file is now optional in MCP mode - can be started dynamically with run_app tool
+
+  // Create process manager (same as CLI mode, but entry may be null)
+  const processManager = new ProcessManager({
+    entry: options.entry || undefined,
+    nodeArgs: options.nodeArgs,
+    appArgs: options.appArgs,
+    interactive: options.interactive,
+    inject: options.inject,
+    eval: options.eval,
+    debug: options.debug,
+    capabilities: {
+      restart: options.capabilities.restart
+    }
+  });
+
+  // Create MCP tools (CLI tools + file tools + shell tools + knowledge tools)
+  const cliTools = createCliTools({
+    processManager,
+    capabilities: options.capabilities,
+    inject: options.inject,
+    eval: options.eval,
+    debug: options.debug
+  });
+  const knowledgeTools = createKnowledgeTools();
+  const fileTools = createFileTools(options.capabilities);
+  const shellTools = createShellTool(options.capabilities);
+
+  // Create SDK MCP server for the embedded agent (used by chat tool)
+  const embeddedMcpServer = createSdkMcpServer({
+    name: 'reflexive-embedded',
+    tools: [...cliTools, ...knowledgeTools]
+  });
+
+  // Chat tool allows external agents to talk to the embedded Reflexive agent
+  const chatTool = createChatTool(processManager, options, embeddedMcpServer);
+
+  // Run app tool allows dynamically switching apps
+  const runAppTool = createRunAppTool(processManager);
+
+  // All tools exposed to external MCP clients
+  const allTools = [...cliTools, ...knowledgeTools, ...fileTools, ...shellTools, chatTool, runAppTool];
+
+  // Optionally start webUI
+  let dashboardPort: number | null = null;
+  if (options.mcpWebUI) {
+    const { port } = await startCliDashboard(processManager, options);
+    dashboardPort = port;
+    process.stderr.write(`Reflexive MCP Server\n`);
+    process.stderr.write(`  Dashboard: http://${options.host}:${port}\n`);
+    if (options.entry) {
+      process.stderr.write(`  Entry: ${resolve(options.entry)}\n`);
+    } else {
+      process.stderr.write(`  Entry: (none - use run_app tool to start an app)\n`);
+    }
+    process.stderr.write(`  Tools: ${allTools.map(t => t.name).join(', ')}\n\n`);
+  } else {
+    process.stderr.write(`Reflexive MCP Server (no webUI)\n`);
+    if (options.entry) {
+      process.stderr.write(`  Entry: ${resolve(options.entry)}\n`);
+    } else {
+      process.stderr.write(`  Entry: (none - use run_app tool to start an app)\n`);
+    }
+    process.stderr.write(`  Tools: ${allTools.map(t => t.name).join(', ')}\n\n`);
+  }
+
+  // Start the process (only if entry is specified)
+  if (options.entry) {
+    processManager.start(dashboardPort || 0);
+  }
+
+  // MCP Protocol handler over stdio
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false
+  });
+
+  // Handle JSON-RPC messages
+  readline.on('line', async (line) => {
+    try {
+      const request = JSON.parse(line);
+      let response: unknown;
+
+      switch (request.method) {
+        case 'initialize':
+          response = {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              protocolVersion: '2024-11-05',
+              capabilities: {
+                tools: {}
+              },
+              serverInfo: {
+                name: 'reflexive',
+                version: '1.0.0'
+              }
+            }
+          };
+          break;
+
+        case 'notifications/initialized':
+          // No response needed for notifications
+          return;
+
+        case 'tools/list':
+          response = {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: {
+              tools: allTools.map(tool => ({
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.inputSchema._def ? {
+                  type: 'object',
+                  properties: Object.fromEntries(
+                    Object.entries((tool.inputSchema as z.ZodObject<z.ZodRawShape>).shape || {}).map(([key, schema]) => [
+                      key,
+                      {
+                        type: 'string', // simplified - could be more accurate
+                        description: (schema as z.ZodTypeAny).description || ''
+                      }
+                    ])
+                  )
+                } : { type: 'object', properties: {} }
+              }))
+            }
+          };
+          break;
+
+        case 'tools/call': {
+          const toolName = request.params?.name;
+          const toolArgs = request.params?.arguments || {};
+          const tool = allTools.find(t => t.name === toolName);
+
+          if (!tool) {
+            response = {
+              jsonrpc: '2.0',
+              id: request.id,
+              error: { code: -32601, message: `Unknown tool: ${toolName}` }
+            };
+          } else {
+            try {
+              const result = await tool.handler(toolArgs);
+              response = {
+                jsonrpc: '2.0',
+                id: request.id,
+                result
+              };
+            } catch (err) {
+              response = {
+                jsonrpc: '2.0',
+                id: request.id,
+                result: {
+                  content: [{ type: 'text', text: `Tool error: ${(err as Error).message}` }],
+                  isError: true
+                }
+              };
+            }
+          }
+          break;
+        }
+
+        default:
+          response = {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: { code: -32601, message: `Method not found: ${request.method}` }
+          };
+      }
+
+      if (response) {
+        process.stdout.write(JSON.stringify(response) + '\n');
+      }
+    } catch (err) {
+      const errorResponse = {
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32700, message: `Parse error: ${(err as Error).message}` }
+      };
+      process.stdout.write(JSON.stringify(errorResponse) + '\n');
+    }
+  });
+
+  // Handle shutdown
+  process.on('SIGINT', async () => {
+    await processManager.stop();
+    processManager.destroy();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    await processManager.stop();
+    processManager.destroy();
+    process.exit(0);
+  });
+
+  readline.on('close', async () => {
     await processManager.stop();
     processManager.destroy();
     process.exit(0);

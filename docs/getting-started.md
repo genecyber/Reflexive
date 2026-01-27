@@ -223,6 +223,10 @@ Reflexive has several capability flags:
 # Debugging
 --debug          # V8 Inspector debugging
 
+# MCP Server
+--mcp            # Run as MCP server for external AI agents
+--no-webui       # Disable web dashboard (MCP mode only)
+
 # Development
 --watch          # Auto-restart on file changes
 --open           # Open dashboard in browser
@@ -237,6 +241,7 @@ Embed Reflexive directly in your application:
 import { makeReflexive } from 'reflexive';
 
 const r = makeReflexive({
+  webUI: true,   // Enable web dashboard (off by default)
   port: 3099,
   title: 'My App'
 });
@@ -248,7 +253,7 @@ console.log('App started');
 r.setState('users.count', 42);
 r.setState('cache.hitRate', 0.95);
 
-// Programmatic chat
+// Programmatic chat (works with or without webUI)
 const answer = await r.chat("What's the current state?");
 console.log(answer);
 ```
@@ -256,7 +261,32 @@ console.log(answer);
 Run it:
 ```bash
 node app.js
+# Dashboard at http://localhost:3099/reflexive
 ```
+
+### Try MCP Server Mode
+
+Run Reflexive as an MCP server for external AI agents like Claude Code:
+
+```bash
+# Start without an app (use run_app tool to start apps dynamically)
+npx reflexive --mcp --write --shell --debug
+
+# Start with a specific app
+npx reflexive --mcp --write --debug ./server.js
+```
+
+Add to Claude Code:
+```bash
+claude mcp add --transport stdio reflexive -- npx reflexive --mcp --write --shell --debug
+```
+
+MCP Server mode enables:
+- External AI agent control
+- Dynamic app switching via `run_app` tool
+- V8 debugging with breakpoints, stepping, and scope inspection (with `--debug`)
+- All reflexive tools exposed to connected agents
+- Optional web dashboard alongside MCP
 
 ### Try Sandbox Mode
 

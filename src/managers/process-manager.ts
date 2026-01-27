@@ -16,7 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export interface ProcessManagerOptions {
-  entry: string;
+  entry?: string;  // Optional - can be set later via setEntry()
   nodeArgs?: string[];
   appArgs?: string[];
   interactive?: boolean;
@@ -57,7 +57,7 @@ export interface InjectedMessage {
 
 export class ProcessManager {
   private options: ProcessManagerOptions;
-  private entry: string;
+  private entry: string | null;
   private cwd: string;
   private child: ChildProcess | null = null;
   private _isRunning = false;
@@ -112,11 +112,27 @@ export class ProcessManager {
 
   constructor(options: ProcessManagerOptions) {
     this.options = options;
-    this.entry = resolve(options.entry);
-    this.cwd = dirname(this.entry);
+    this.entry = options.entry ? resolve(options.entry) : null;
+    this.cwd = this.entry ? dirname(this.entry) : process.cwd();
     this.interactive = options.interactive || false;
     this.inject = options.inject || false;
     this.debug = options.debug || false;
+  }
+
+  /**
+   * Set or change the entry file (for dynamic app switching)
+   */
+  setEntry(entryPath: string): void {
+    this.entry = resolve(entryPath);
+    this.cwd = dirname(this.entry);
+    this.options.entry = this.entry;
+  }
+
+  /**
+   * Check if an entry file is configured
+   */
+  hasEntry(): boolean {
+    return this.entry !== null;
   }
 
   /**
@@ -188,6 +204,10 @@ export class ProcessManager {
    */
   start(cliPort?: number): void {
     if (this._isRunning) return;
+    if (!this.entry) {
+      this._log('error', 'No entry file configured. Use setEntry() or run_app tool first.');
+      return;
+    }
 
     // Store CLI port for environment setup
     if (cliPort) {
@@ -342,6 +362,20 @@ export class ProcessManager {
     this._log('system', 'Restarting...');
     await this.stop();
     this.restartCount++;
+    this.start();
+  }
+
+  /**
+   * Run a different app (stop current, switch entry, start new)
+   */
+  async runApp(entryPath: string, appArgs?: string[]): Promise<void> {
+    this._log('system', `Switching to: ${entryPath}`);
+    await this.stop();
+    this.setEntry(entryPath);
+    if (appArgs) {
+      this.options.appArgs = appArgs;
+    }
+    this.restartCount = 0;  // Reset restart count for new app
     this.start();
   }
 
@@ -900,7 +934,7 @@ export class ProcessManager {
       uptime: this.startTime ? Math.floor((Date.now() - this.startTime) / 1000) : 0,
       restartCount: this.restartCount,
       exitCode: this.exitCode,
-      entry: this.entry,
+      entry: this.entry || '',
       cwd: this.cwd,
       interactive: this.interactive,
       waitingForInput: this.waitingForInput,
