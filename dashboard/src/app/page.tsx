@@ -71,8 +71,18 @@ export default function Dashboard() {
 
   // Track which logs have been checked to avoid duplicate triggers
   const lastCheckedLogIndexRef = useRef(0);
-  // Rate limiter: prevent triggering more than once per 2 seconds
-  const lastWatchTriggerTimeRef = useRef(0);
+
+  // Aggregated watch trigger queue
+  // Key: watchId-pattern, Value: { watch, timestamps, count, firstLog }
+  const watchQueueRef = useRef<Map<string, {
+    watch: Watch;
+    pattern: string;
+    timestamps: string[];
+    count: number;
+    firstLog: string;
+    prompt: string;
+  }>>(new Map());
+  const isProcessingQueueRef = useRef(false);
 
   // Modal state
   const [watchModalOpen, setWatchModalOpen] = useState(false);
@@ -89,8 +99,52 @@ export default function Dashboard() {
   // Right panel collapsed state
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
+  // Process the aggregated watch queue when agent finishes
+  const processWatchQueue = useCallback(() => {
+    if (isProcessingQueueRef.current || isLoading) return;
+
+    const queue = watchQueueRef.current;
+    if (queue.size === 0) return;
+
+    // Get the first entry (oldest aggregate)
+    const firstEntry = queue.entries().next();
+    if (firstEntry.done || !firstEntry.value) return;
+    const [key, entry] = firstEntry.value;
+    queue.delete(key);
+
+    isProcessingQueueRef.current = true;
+
+    // Build the aggregated message
+    const countText = entry.count > 1 ? ` (triggered ${entry.count}x)` : '';
+    const timestampList = entry.timestamps.slice(0, 5).join(', ') + (entry.timestamps.length > 5 ? '...' : '');
+
+    const contextMsg = `WATCH TRIGGER: Pattern "${entry.pattern}" matched${countText}
+
+Sample message: ${entry.firstLog}
+
+Timestamps: [${timestampList}]
+
+User prompt: ${entry.prompt}`;
+
+    sendMessage(contextMsg, { isWatchTrigger: true, watchPattern: entry.pattern });
+  }, [isLoading, sendMessage]);
+
+  // Watch queue processor - runs when loading state changes
+  useEffect(() => {
+    if (!isLoading && isProcessingQueueRef.current) {
+      // Just finished processing, reset flag and check for more
+      isProcessingQueueRef.current = false;
+    }
+
+    if (!isLoading) {
+      // Small delay to let state settle, then process next
+      const timer = setTimeout(processWatchQueue, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, processWatchQueue]);
+
   // Watch auto-prompting: monitor logs for watch triggers
-  // Matches original logic: always count hits, only trigger prompt if exists and not loading
+  // Adds to aggregated queue instead of sending directly
   useEffect(() => {
     if (logs.length === 0 || watches.length === 0) return;
 
@@ -112,17 +166,35 @@ export default function Dashboard() {
             w.id === watch.id ? { ...w, hitCount: w.hitCount + 1 } : w
           ));
 
-          // Only trigger the prompt if there IS one AND not currently loading AND rate limit passed
-          const now = Date.now();
-          const timeSinceLastTrigger = now - lastWatchTriggerTimeRef.current;
-          if (watch.prompt && !isLoading && timeSinceLastTrigger > 2000) {
-            lastWatchTriggerTimeRef.current = now;
-            const contextMsg = `WATCH TRIGGER: A log message matched pattern "${watch.pattern}"\n\nMatched message: ${log.message}\n\nUser prompt: ${watch.prompt}`;
-            sendMessage(contextMsg, { isWatchTrigger: true, watchPattern: watch.pattern });
+          // If watch has a prompt, add to aggregated queue
+          if (watch.prompt) {
+            const queueKey = `${watch.id}-${watch.pattern}`;
+            const queue = watchQueueRef.current;
+            const existing = queue.get(queueKey);
+
+            if (existing) {
+              // Aggregate: increment count, add timestamp
+              existing.count++;
+              existing.timestamps.push(log.timestamp);
+            } else {
+              // New entry
+              queue.set(queueKey, {
+                watch,
+                pattern: watch.pattern,
+                timestamps: [log.timestamp],
+                count: 1,
+                firstLog: log.message,
+                prompt: watch.prompt,
+              });
+            }
+
+            // If not currently loading or processing, trigger queue processing
+            if (!isLoading && !isProcessingQueueRef.current) {
+              processWatchQueue();
+            }
           }
 
-          // Update lastCheckedLogIndex - found a match for this log, move on
-          // (original returns after first match per log)
+          // Found a match for this log, move on (original returns after first match per log)
           break;
         }
       }
@@ -130,7 +202,7 @@ export default function Dashboard() {
 
     // Update lastCheckedLogIndex
     lastCheckedLogIndexRef.current = logs.length;
-  }, [logs.length, watches, isLoading, sendMessage]);
+  }, [logs.length, watches, isLoading, processWatchQueue]);
 
   // Watch handlers
   const handleAddWatch = useCallback((message: string) => {
