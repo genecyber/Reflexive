@@ -120,10 +120,21 @@ interface CliOptions {
   sandbox: boolean;
   mcp: boolean;      // Run as stdio MCP server for external agents
   mcpWebUI: boolean; // Enable webUI when in MCP mode (default: true)
+  demo: string | null; // Demo name to run (basic, queue, inject)
   capabilities: Capabilities;
   nodeArgs: string[];
   appArgs: string[];
 }
+
+// Demo name mapping
+const DEMOS: Record<string, { file: string; flags?: string[] }> = {
+  'basic': { file: 'basic-server.js' },
+  'server': { file: 'basic-server.js' },
+  'queue': { file: 'task-queue.js' },
+  'task': { file: 'task-queue.js' },
+  'inject': { file: 'injection-test.js', flags: ['--inject'] },
+  'eval': { file: 'injection-test.js', flags: ['--eval'] },
+};
 
 function parseArgs(args: string[]): CliOptions {
   const options: CliOptions = {
@@ -138,6 +149,7 @@ function parseArgs(args: string[]): CliOptions {
     sandbox: false,
     mcp: false,
     mcpWebUI: true,  // webUI on by default even in MCP mode
+    demo: null,
     capabilities: {
       readFiles: true,
       writeFiles: false,
@@ -224,6 +236,9 @@ function parseArgs(args: string[]): CliOptions {
       options.debug = true;
     } else if (arg === '--node-args') {
       options.nodeArgs = args[++i].split(' ');
+    } else if (arg === '--demo') {
+      options.demo = args[++i] || 'basic';
+      options.open = true;  // Auto-open browser for demos
     } else if (arg === '--help') {
       printHelp();
       process.exit(0);
@@ -263,6 +278,7 @@ OPTIONS:
   -s, --sandbox           Run in Vercel Sandbox (isolated environment)
       --mcp               Run as stdio MCP server (for external AI agents like Claude Code)
       --no-webui          Disable web dashboard (only applies to --mcp mode)
+      --demo <name>       Run a built-in demo (basic, queue, inject, eval)
       --eval              Enable runtime code evaluation (includes deep instrumentation)
   -d, --debug             Enable V8 Inspector debugging (breakpoints, stepping, scope inspection)
       --inspect           Enable eval + debug (the "poke around" mode)
@@ -307,9 +323,18 @@ MCP SERVER MODE:
   Use the run_app tool to dynamically start or switch between different apps.
   WebUI is still available at http://localhost:3099 unless --no-webui is specified.
 
+DEMOS:
+  Run built-in demos to explore Reflexive features:
+
+    reflexive --demo basic     # HTTP server with watch trigger demos
+    reflexive --demo queue     # Task queue with background worker
+    reflexive --demo inject    # Injection mode demo (console, HTTP, GC tracking)
+    reflexive --demo eval      # Eval mode demo (runtime code evaluation)
+
 EXAMPLES:
   reflexive                                    # Auto-detect from package.json
   reflexive ./index.js                         # Run specific file
+  reflexive --demo basic                       # Run the basic demo
   reflexive --sandbox ./app.js                 # Run in isolated Vercel Sandbox
   reflexive --mcp --write ./app.js             # Run as MCP server for external agents
   reflexive --dev ./app.js                     # Development mode (write + shell + eval)
@@ -1342,6 +1367,49 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
+
+  // Handle --demo flag
+  if (options.demo) {
+    const demoName = options.demo.toLowerCase();
+    const demo = DEMOS[demoName];
+
+    if (!demo) {
+      console.error(`Unknown demo: ${options.demo}`);
+      console.log('\nAvailable demos:');
+      console.log('  basic, server  - Basic HTTP server with watch trigger demos');
+      console.log('  queue, task    - Task queue with background worker');
+      console.log('  inject         - Injection mode demo (runs with --inject)');
+      console.log('  eval           - Eval mode demo (runs with --eval)');
+      process.exit(1);
+    }
+
+    // Resolve the demo file path from the package installation
+    const demosDir = join(__dirname, '..', 'demos');
+    const demoPath = join(demosDir, demo.file);
+
+    if (!existsSync(demoPath)) {
+      console.error(`Demo file not found: ${demoPath}`);
+      console.log('Demos may not be installed. Try reinstalling reflexive.');
+      process.exit(1);
+    }
+
+    options.entry = demoPath;
+
+    // Apply demo-specific flags
+    if (demo.flags) {
+      for (const flag of demo.flags) {
+        if (flag === '--inject') {
+          options.inject = true;
+        } else if (flag === '--eval') {
+          options.inject = true;
+          options.eval = true;
+          options.capabilities.eval = true;
+        }
+      }
+    }
+
+    console.log(`Running demo: ${demoName} (${demo.file})\n`);
+  }
 
   // MCP mode - can run without entry file (use run_app tool to start apps)
   if (options.mcp) {

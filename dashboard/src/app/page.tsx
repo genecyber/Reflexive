@@ -46,6 +46,7 @@ export default function Dashboard() {
     startProcess,
     stopProcess,
     restartProcess,
+    runApp,
     shutdown,
     debuggerResume,
     debuggerStepOver,
@@ -317,6 +318,7 @@ User prompt: ${entry.prompt}`;
           onStart={startProcess}
           onStop={stopProcess}
           onRestart={restartProcess}
+          onRunApp={runApp}
           onShutdown={handleShutdown}
         />
 

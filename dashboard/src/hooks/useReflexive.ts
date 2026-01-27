@@ -81,6 +81,17 @@ export function useReflexive() {
     await fetchStatus();
   }, [fetchStatus]);
 
+  const runApp = useCallback(async (path: string, args?: string[]) => {
+    const res = await fetch(`${API_BASE}/run-app`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, args }),
+    });
+    const data = await res.json();
+    await fetchStatus();
+    return data;
+  }, [fetchStatus]);
+
   const shutdown = useCallback(async () => {
     await fetch(`${API_BASE}/shutdown`, { method: 'POST' });
   }, []);
@@ -220,6 +231,7 @@ export function useReflexive() {
     startProcess,
     stopProcess,
     restartProcess,
+    runApp,
     shutdown,
 
     // Debugger control
