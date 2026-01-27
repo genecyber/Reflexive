@@ -526,10 +526,24 @@ export class ProcessManager {
     try {
       this.debugger = new RemoteDebugger();
 
+      // Track whether we're waiting for the initial --inspect-brk pause
+      let waitingForInitialPause = true;
+
       // Forward debugger events
       this.debugger.on('paused', (data: unknown) => {
         const pauseData = data as { reason: string; hitBreakpoints?: string[]; callFrames: CallFrame[] };
         this._log('debug', `Debugger paused: ${pauseData.reason}${pauseData.hitBreakpoints?.length ? ` at ${pauseData.hitBreakpoints.join(', ')}` : ''}`);
+
+        // Auto-resume from initial --inspect-brk pause ("Break on start")
+        if (waitingForInitialPause && pauseData.reason === 'Break on start') {
+          waitingForInitialPause = false;
+          this._log('debug', 'Auto-resuming from initial break on start');
+          // Resume asynchronously to not block the event handler
+          this.debugger?.resume().catch((err: Error) => {
+            this._log('debug', `Auto-resume error (non-critical): ${err.message}`);
+          });
+          return; // Don't emit this pause to dashboard
+        }
 
         // Check if any hit breakpoint has a prompt to trigger
         if (pauseData.hitBreakpoints && pauseData.hitBreakpoints.length > 0) {
@@ -586,28 +600,10 @@ export class ProcessManager {
         }
       }
 
-      // Auto-resume from initial --inspect-brk pause
-      // Use a short delay to allow breakpoints to be restored first
-      setTimeout(async () => {
-        if (this.debugger) {
-          try {
-            // With --inspect-brk, process is waiting for debugger
-            // runIfWaitingForDebugger starts it, but it immediately pauses on first line
-            // So we need to also call resume()
-            this._log('debug', 'Starting app (runIfWaitingForDebugger)');
-            await this.debugger.runIfWaitingForDebugger();
-
-            // Give it a moment to hit the first-line breakpoint
-            await new Promise(r => setTimeout(r, 50));
-
-            // Now resume from the first-line breakpoint
-            this._log('debug', 'Resuming from first-line breakpoint');
-            await this.debugger.resume();
-          } catch (err) {
-            this._log('debug', `Start error (non-critical): ${(err as Error).message}`);
-          }
-        }
-      }, 200);
+      // Start the app - runIfWaitingForDebugger will trigger a "Break on start" pause
+      // which the paused event handler above will auto-resume from
+      this._log('debug', 'Starting app (runIfWaitingForDebugger)');
+      await this.debugger.runIfWaitingForDebugger();
 
     } catch (err) {
       this._log('error', `Failed to connect debugger: ${(err as Error).message}`);
