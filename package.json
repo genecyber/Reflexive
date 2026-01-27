@@ -1,6 +1,6 @@
 {
   "name": "reflexive",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "AI-powered introspection for Node.js apps. Monitor external processes or instrument your own with Claude Agent SDK.",
   "type": "module",
   "main": "./dist/index.js",
