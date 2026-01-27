@@ -319,8 +319,15 @@ export function useChat() {
                   });
                 } else if (data.type === 'tool') {
                   const toolName = data.name.replace(/^mcp__[^_]+__/, '');
+                  // Truncate values to keep display compact and regex-safe
+                  const truncate = (val: unknown, maxLen = 50): string => {
+                    const str = typeof val === 'string' ? val : JSON.stringify(val);
+                    // Remove newlines, collapse whitespace, strip ) to prevent regex breakage
+                    const clean = str.replace(/\n/g, ' ').replace(/\s+/g, ' ').replace(/[()]/g, '');
+                    return clean.length > maxLen ? clean.slice(0, maxLen) + '...' : clean;
+                  };
                   const inputs = Object.entries(data.input || {})
-                    .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+                    .map(([k, v]) => `${k}: ${truncate(v)}`)
                     .join(', ');
                   fullText += `\n\n🔧 **${toolName}**${inputs ? ` (${inputs})` : ''}\n\n`;
                   setMessages(prev => {
