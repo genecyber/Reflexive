@@ -16,39 +16,10 @@ interface HeaderProps {
 export function Header({ status, showControls, onStart, onStop, onRestart, onRunApp, onShutdown }: HeaderProps) {
   const isRunning = status?.isRunning ?? false;
 
-  const handleFilePicker = useCallback(async () => {
-    try {
-      // Use File System Access API
-      if ('showOpenFilePicker' in window) {
-        const [fileHandle] = await (window as unknown as { showOpenFilePicker: (options: unknown) => Promise<FileSystemFileHandle[]> }).showOpenFilePicker({
-          types: [
-            {
-              description: 'JavaScript files',
-              accept: { 'application/javascript': ['.js', '.mjs', '.cjs', '.ts'] },
-            },
-          ],
-          multiple: false,
-        });
-        // Get the full path - unfortunately File System Access API doesn't expose the full path
-        // We'll use the file name and let the user know
-        const file = await fileHandle.getFile();
-        // For security, browsers don't expose full paths. We'll prompt for the path.
-        const path = prompt(`Enter the full path to run (file selected: ${file.name}):`, file.name);
-        if (path) {
-          await onRunApp(path);
-        }
-      } else {
-        // Fallback: prompt for path directly
-        const path = prompt('Enter the path to the Node.js file to run:');
-        if (path) {
-          await onRunApp(path);
-        }
-      }
-    } catch (err) {
-      // User cancelled or error
-      if ((err as Error).name !== 'AbortError') {
-        console.error('File picker error:', err);
-      }
+  const handleRunApp = useCallback(async () => {
+    const path = prompt('Enter the path to the Node.js file to run:');
+    if (path && path.trim()) {
+      await onRunApp(path.trim());
     }
   }, [onRunApp]);
 
@@ -73,11 +44,11 @@ export function Header({ status, showControls, onStart, onStop, onRestart, onRun
       {showControls ? (
         <div className="flex gap-2">
           <button
-            onClick={handleFilePicker}
+            onClick={handleRunApp}
             className="px-3 py-1.5 text-xs bg-zinc-800 border border-blue-500 rounded text-white hover:bg-blue-900"
             title="Run a different app"
           >
-            📂 Run App
+            Run App
           </button>
           <button
             onClick={onStart}
