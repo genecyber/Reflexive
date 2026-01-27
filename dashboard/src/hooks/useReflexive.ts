@@ -146,6 +146,16 @@ export function useReflexive() {
     });
   }, []);
 
+  // Toggle permission
+  const togglePermission = useCallback(async (permission: string) => {
+    await fetch(`${API_BASE}/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ permission, toggle: true }),
+    });
+    await fetchStatus();
+  }, [fetchStatus]);
+
   // Polling
   useEffect(() => {
     fetchStatus();
@@ -206,33 +216,45 @@ export function useReflexive() {
     // CLI
     sendCliInput,
     logMessage,
+
+    // Permissions
+    togglePermission,
   };
+}
+
+// Chat message type with optional metadata
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  isWatchTrigger?: boolean;
+  watchPattern?: string;
 }
 
 // Chat hook for streaming
 export function useChat() {
-  const [messages, setMessages] = useState<Array<{
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-  }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const sendMessage = useCallback(async (message: string) => {
-    const userMessage = {
+  const sendMessage = useCallback(async (message: string, options?: { isWatchTrigger?: boolean; watchPattern?: string }) => {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user' as const,
       content: message,
+      isWatchTrigger: options?.isWatchTrigger,
+      watchPattern: options?.watchPattern,
     };
 
     setMessages(prev => [...prev, userMessage]);
     setIsLoading(true);
 
-    const assistantMessage = {
+    const assistantMessage: ChatMessage = {
       id: (Date.now() + 1).toString(),
       role: 'assistant' as const,
       content: '',
+      isWatchTrigger: options?.isWatchTrigger,
+      watchPattern: options?.watchPattern,
     };
     setMessages(prev => [...prev, assistantMessage]);
 

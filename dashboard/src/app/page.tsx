@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Header } from '@/components/Header';
 import { ChatPanel } from '@/components/ChatPanel';
 import { LogsPanel } from '@/components/LogsPanel';
@@ -9,23 +9,33 @@ import { WatchModal, BreakpointPromptModal, ShutdownScreen } from '@/components/
 import { useReflexive, useChat } from '@/hooks/useReflexive';
 import type { Watch, Breakpoint, Capabilities } from '@/types';
 
-// Configuration - in production, this would come from the server
-const CONFIG = {
-  showControls: true,
-  interactive: false,
-  inject: true,
-  debug: true,
-  capabilities: {
-    readFiles: true,
-    writeFiles: false,
-    shellAccess: false,
-    restart: true,
-    networkAccess: true,
-    inject: true,
-    eval: false,
-    debug: true,
-  } as Capabilities,
+// Default configuration - overridden by server-provided values in status
+const DEFAULT_CAPABILITIES: Capabilities = {
+  readFiles: true,
+  writeFiles: false,
+  shellAccess: false,
+  restart: true,
+  networkAccess: true,
+  inject: false,
+  eval: false,
+  debug: false,
 };
+
+function CollapsedSectionLabel({ label, count, onClick }: { label: string; count?: number; onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      className="py-3 px-2 text-xs text-zinc-500 cursor-pointer border-b border-zinc-800 hover:text-white hover:bg-zinc-800 flex items-center gap-1"
+      style={{ writingMode: 'vertical-rl' }}
+    >
+      <span className="text-[10px]">&#9654;</span>
+      <span>{label}</span>
+      {count !== undefined && count > 0 && (
+        <span className="bg-zinc-700 px-1 rounded text-[9px]">{count}</span>
+      )}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const {
@@ -44,6 +54,7 @@ export default function Dashboard() {
     updateBreakpoint,
     deleteBreakpoint,
     sendCliInput,
+    togglePermission,
   } = useReflexive();
 
   const {
@@ -58,6 +69,11 @@ export default function Dashboard() {
   const [watches, setWatches] = useState<Watch[]>([]);
   const [watchIdCounter, setWatchIdCounter] = useState(0);
 
+  // Track which logs have been checked to avoid duplicate triggers
+  const lastCheckedLogIndexRef = useRef(0);
+  // Rate limiter: prevent triggering more than once per 2 seconds
+  const lastWatchTriggerTimeRef = useRef(0);
+
   // Modal state
   const [watchModalOpen, setWatchModalOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<Watch | null>(null);
@@ -68,6 +84,53 @@ export default function Dashboard() {
 
   // Panel width state for resizing
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
+  const [debugPanelsHeight, setDebugPanelsHeight] = useState(180);
+
+  // Right panel collapsed state
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+
+  // Watch auto-prompting: monitor logs for watch triggers
+  // Matches original logic: always count hits, only trigger prompt if exists and not loading
+  useEffect(() => {
+    if (logs.length === 0 || watches.length === 0) return;
+
+    // Only check logs from lastCheckedLogIndex onwards
+    const startIndex = lastCheckedLogIndexRef.current;
+    if (startIndex >= logs.length) return;
+
+    // Check new logs for watch pattern matches
+    for (let i = startIndex; i < logs.length; i++) {
+      const log = logs[i];
+
+      for (const watch of watches) {
+        // Only skip if disabled (original behavior - don't skip if no prompt)
+        if (!watch.enabled) continue;
+
+        if (log.message.toLowerCase().includes(watch.pattern.toLowerCase())) {
+          // Always increment hit count (even without prompt)
+          setWatches(prev => prev.map(w =>
+            w.id === watch.id ? { ...w, hitCount: w.hitCount + 1 } : w
+          ));
+
+          // Only trigger the prompt if there IS one AND not currently loading AND rate limit passed
+          const now = Date.now();
+          const timeSinceLastTrigger = now - lastWatchTriggerTimeRef.current;
+          if (watch.prompt && !isLoading && timeSinceLastTrigger > 2000) {
+            lastWatchTriggerTimeRef.current = now;
+            const contextMsg = `WATCH TRIGGER: A log message matched pattern "${watch.pattern}"\n\nMatched message: ${log.message}\n\nUser prompt: ${watch.prompt}`;
+            sendMessage(contextMsg, { isWatchTrigger: true, watchPattern: watch.pattern });
+          }
+
+          // Update lastCheckedLogIndex - found a match for this log, move on
+          // (original returns after first match per log)
+          break;
+        }
+      }
+    }
+
+    // Update lastCheckedLogIndex
+    lastCheckedLogIndexRef.current = logs.length;
+  }, [logs.length, watches, isLoading, sendMessage]);
 
   // Watch handlers
   const handleAddWatch = useCallback((message: string) => {
@@ -140,27 +203,27 @@ export default function Dashboard() {
   }, [shutdown]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-200">
+    <div className="h-screen overflow-hidden bg-zinc-950 text-zinc-200 flex flex-col">
       <ShutdownScreen isShutdown={isShutdown} />
 
-      <div className="max-w-7xl mx-auto px-3 py-2">
+      <div className="max-w-7xl mx-auto px-3 py-1 w-full flex flex-col h-full">
         <Header
           status={status}
-          showControls={CONFIG.showControls}
+          showControls={status?.showControls ?? true}
           onStart={startProcess}
           onStop={stopProcess}
           onRestart={restartProcess}
           onShutdown={handleShutdown}
         />
 
-        <div className="flex gap-0 h-[calc(100vh-100px)]">
+        <div className="flex gap-0 flex-1 min-h-0">
           {/* Chat Panel */}
           <ChatPanel
             messages={messages}
             isLoading={isLoading}
             isRunning={status?.isRunning ?? false}
-            showControls={CONFIG.showControls}
-            interactive={CONFIG.interactive}
+            showControls={status?.showControls ?? true}
+            interactive={status?.interactive ?? false}
             onSendMessage={sendMessage}
             onStopResponse={stopResponse}
             onClearMessages={clearMessages}
@@ -176,7 +239,7 @@ export default function Dashboard() {
 
               const handleMouseMove = (e: MouseEvent) => {
                 const diff = startX - e.clientX;
-                const newWidth = Math.max(250, Math.min(600, startWidth + diff));
+                const newWidth = Math.max(200, Math.min(800, startWidth + diff));
                 setRightPanelWidth(newWidth);
               };
 
@@ -193,37 +256,60 @@ export default function Dashboard() {
           </div>
 
           {/* Right Panel - Logs + Debug */}
-          <div
-            className="flex flex-col bg-zinc-900 border border-zinc-800 rounded-md overflow-hidden"
-            style={{ width: rightPanelWidth, flexShrink: 0 }}
-          >
-            <LogsPanel
-              logs={logs}
-              status={status}
-              showControls={CONFIG.showControls}
-              onAddWatch={handleAddWatch}
-            />
-
-            {CONFIG.showControls && (
-              <DebugPanels
-                capabilities={CONFIG.capabilities}
-                watches={watches}
-                breakpoints={breakpoints}
-                debuggerStatus={debuggerStatus}
-                showDebug={CONFIG.debug}
-                onEditWatch={handleEditWatch}
-                onDeleteWatch={handleDeleteWatch}
-                onToggleWatch={handleToggleWatch}
-                onEditBreakpointPrompt={handleEditBreakpointPrompt}
-                onDeleteBreakpoint={deleteBreakpoint}
-                onToggleBreakpoint={handleToggleBreakpoint}
-                onDebuggerResume={debuggerResume}
-                onDebuggerStepOver={debuggerStepOver}
-                onDebuggerStepInto={debuggerStepInto}
-                onDebuggerStepOut={debuggerStepOut}
+          {isRightPanelCollapsed ? (
+            <div className="w-[42px] bg-zinc-900 border border-zinc-800 rounded-md flex flex-col flex-shrink-0">
+              <CollapsedSectionLabel label="Logs" onClick={() => setIsRightPanelCollapsed(false)} />
+              <CollapsedSectionLabel label="Permissions" onClick={() => setIsRightPanelCollapsed(false)} />
+              <CollapsedSectionLabel label="Watch" count={watches.length} onClick={() => setIsRightPanelCollapsed(false)} />
+              <CollapsedSectionLabel label="Debugger" onClick={() => setIsRightPanelCollapsed(false)} />
+            </div>
+          ) : (
+            <div
+              className="flex flex-col bg-zinc-900 border border-zinc-800 rounded-md overflow-hidden"
+              style={{ width: rightPanelWidth, flexShrink: 0 }}
+            >
+              {/* Collapse button */}
+              <div className="flex justify-end px-1 pt-1">
+                <button
+                  onClick={() => setIsRightPanelCollapsed(true)}
+                  className="text-zinc-500 hover:text-white hover:bg-zinc-800 rounded p-0.5 text-[10px]"
+                  title="Collapse panel"
+                >
+                  &#9654;&#9654;
+                </button>
+              </div>
+              <LogsPanel
+                logs={logs}
+                status={status}
+                showControls={status?.showControls ?? true}
+                debugPanelsHeight={debugPanelsHeight}
+                onAddWatch={handleAddWatch}
+                onResize={(height) => setDebugPanelsHeight(Math.max(60, Math.min(400, height)))}
               />
-            )}
-          </div>
+
+              {(status?.showControls ?? true) && (
+                <DebugPanels
+                  capabilities={status?.capabilities ?? DEFAULT_CAPABILITIES}
+                  watches={watches}
+                  breakpoints={breakpoints}
+                  debuggerStatus={debuggerStatus}
+                  showDebug={status?.debug ?? false}
+                  height={debugPanelsHeight}
+                  onEditWatch={handleEditWatch}
+                  onDeleteWatch={handleDeleteWatch}
+                  onToggleWatch={handleToggleWatch}
+                  onEditBreakpointPrompt={handleEditBreakpointPrompt}
+                  onDeleteBreakpoint={deleteBreakpoint}
+                  onToggleBreakpoint={handleToggleBreakpoint}
+                  onDebuggerResume={debuggerResume}
+                  onDebuggerStepOver={debuggerStepOver}
+                  onDebuggerStepInto={debuggerStepInto}
+                  onDebuggerStepOut={debuggerStepOut}
+                  onTogglePermission={togglePermission}
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
 

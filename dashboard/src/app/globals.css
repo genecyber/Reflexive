@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 :root {
   --background: #09090b;
   --foreground: #e4e4e7;
@@ -58,7 +63,7 @@ body {
 }
 
 .prose code {
-  font-family: var(--font-mono), monospace;
+  font-family: 'SF Mono', Monaco, monospace;
 }
 
 .prose :not(pre) > code {

@@ -18,8 +18,13 @@ export function Header({ status, showControls, onStart, onStop, onRestart, onShu
     <header className="flex justify-between items-center py-1 px-0 border-b border-zinc-800 mb-2">
       <div>
         <h1 className="text-lg font-bold flex items-center gap-0">
-          <span className="text-2xl font-bold tracking-wider bg-gradient-to-r from-green-400 via-green-500 to-green-600 bg-clip-text text-transparent">
-            REFLEXIVE
+          <img
+            src="/logo-carbon.png"
+            alt="R"
+            className="h-[90px] w-auto -mr-[26px] -mt-1 -ml-4 relative z-10 drop-shadow-[0_0_4px_rgba(74,222,128,0.2)]"
+          />
+          <span className="text-2xl font-bold tracking-wider bg-gradient-to-r from-green-400 via-green-500 to-green-600 bg-clip-text text-transparent -ml-3">
+            EFLEXIVE
           </span>
         </h1>
         {status?.entry && (

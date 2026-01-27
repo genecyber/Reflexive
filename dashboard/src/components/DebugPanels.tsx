@@ -9,6 +9,7 @@ interface DebugPanelsProps {
   breakpoints: Breakpoint[];
   debuggerStatus: DebuggerStatus | null;
   showDebug: boolean;
+  height?: number;
   onEditWatch: (watch: Watch) => void;
   onDeleteWatch: (id: number) => void;
   onToggleWatch: (id: number, enabled: boolean) => void;
@@ -19,6 +20,7 @@ interface DebugPanelsProps {
   onDebuggerStepOver: () => void;
   onDebuggerStepInto: () => void;
   onDebuggerStepOut: () => void;
+  onTogglePermission?: (permission: string) => void;
 }
 
 export function DebugPanels({
@@ -27,6 +29,7 @@ export function DebugPanels({
   breakpoints,
   debuggerStatus,
   showDebug,
+  height,
   onEditWatch,
   onDeleteWatch,
   onToggleWatch,
@@ -37,6 +40,7 @@ export function DebugPanels({
   onDebuggerStepOver,
   onDebuggerStepInto,
   onDebuggerStepOut,
+  onTogglePermission,
 }: DebugPanelsProps) {
   const [permissionsCollapsed, setPermissionsCollapsed] = useState(false);
   const [watchCollapsed, setWatchCollapsed] = useState(false);
@@ -45,7 +49,7 @@ export function DebugPanels({
   const isPaused = debuggerStatus?.connected && debuggerStatus?.paused;
 
   return (
-    <div className="flex flex-col border-t border-zinc-800">
+    <div className="flex flex-col border-t border-zinc-800 overflow-y-auto" style={height ? { height, flexShrink: 0 } : undefined}>
       {/* Permissions Section */}
       <DebugSection
         title="Permissions"
@@ -53,14 +57,14 @@ export function DebugPanels({
         onToggle={() => setPermissionsCollapsed(!permissionsCollapsed)}
       >
         <div className="grid grid-cols-2 gap-1 p-2">
-          <PermissionItem label="Read Files" enabled={capabilities.readFiles} />
-          <PermissionItem label="Write Files" enabled={capabilities.writeFiles} />
-          <PermissionItem label="Shell Access" enabled={capabilities.shellAccess} />
-          <PermissionItem label="Restart Process" enabled={capabilities.restart} />
-          <PermissionItem label="Network Access" enabled={capabilities.networkAccess} />
-          <PermissionItem label="Injection" enabled={capabilities.inject} />
-          <PermissionItem label="Eval" enabled={capabilities.eval} />
-          <PermissionItem label="V8 Debugging" enabled={capabilities.debug} />
+          <PermissionItem label="Read Files" enabled={capabilities.readFiles} permissionKey="readFiles" onToggle={onTogglePermission} />
+          <PermissionItem label="Write Files" enabled={capabilities.writeFiles} permissionKey="writeFiles" onToggle={onTogglePermission} />
+          <PermissionItem label="Shell Access" enabled={capabilities.shellAccess} permissionKey="shellAccess" onToggle={onTogglePermission} />
+          <PermissionItem label="Restart Process" enabled={capabilities.restart} permissionKey="restart" onToggle={onTogglePermission} />
+          <PermissionItem label="Network Access" enabled={capabilities.networkAccess} permissionKey="networkAccess" onToggle={onTogglePermission} />
+          <PermissionItem label="Injection" enabled={capabilities.inject} permissionKey="inject" onToggle={onTogglePermission} />
+          <PermissionItem label="Eval" enabled={capabilities.eval} permissionKey="eval" onToggle={onTogglePermission} />
+          <PermissionItem label="V8 Debugging" enabled={capabilities.debug} permissionKey="debug" onToggle={onTogglePermission} />
         </div>
       </DebugSection>
 
@@ -80,7 +84,7 @@ export function DebugPanels({
             {watches.map((watch) => (
               <div
                 key={watch.id}
-                className={`flex items-center gap-2 px-3 py-1 text-xs border-b border-zinc-900 hover:bg-zinc-800/50 ${
+                className={`group flex items-center gap-2 px-3 py-1.5 text-xs border-b border-zinc-900 hover:bg-zinc-800/50 ${
                   watch.enabled ? '' : 'opacity-40'
                 }`}
               >
@@ -90,20 +94,30 @@ export function DebugPanels({
                   onChange={(e) => onToggleWatch(watch.id, e.target.checked)}
                   className="w-3 h-3 accent-blue-500"
                 />
-                <span className={`flex-1 font-mono truncate ${!watch.enabled ? 'line-through' : ''}`} title={watch.pattern}>
+                <span
+                  className={`flex-1 truncate text-[11px] ${!watch.enabled ? 'line-through' : ''}`}
+                  style={{ fontFamily: "'SF Mono', Monaco, monospace" }}
+                  title={watch.pattern}
+                >
                   {watch.pattern.slice(0, 40)}{watch.pattern.length > 40 ? '...' : ''}
                 </span>
-                <span className="text-zinc-600 text-[10px]">{watch.hitCount} hits</span>
+                {watch.hitCount > 0 && (
+                  <span className="px-1.5 py-0.5 text-[9px] font-medium bg-zinc-800 text-amber-400 rounded-full">
+                    {watch.hitCount}
+                  </span>
+                )}
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onEditWatch(watch)}
-                    className="text-zinc-500 hover:text-white"
+                    className="text-zinc-500 hover:text-white px-1 py-0.5 rounded hover:bg-zinc-700"
+                    title="Edit"
                   >
                     ✎
                   </button>
                   <button
                     onClick={() => onDeleteWatch(watch.id)}
-                    className="text-zinc-500 hover:text-red-500"
+                    className="text-zinc-500 hover:text-red-500 px-1 py-0.5 rounded hover:bg-red-500/10"
+                    title="Delete"
                   >
                     ✕
                   </button>
@@ -189,7 +203,7 @@ export function DebugPanels({
                     {bp.file.split('/').pop()}:{bp.line}
                   </span>
                   {bp.hitCount > 0 && (
-                    <span className="text-zinc-600 text-[10px]">{bp.hitCount}</span>
+                    <span className="px-1.5 py-0.5 text-[9px] font-medium bg-zinc-800 text-amber-400 rounded-full">{bp.hitCount}</span>
                   )}
                   <button
                     onClick={() => onEditBreakpointPrompt(bp)}
@@ -271,11 +285,22 @@ function DebugSection({ title, count, badge, controls, collapsed, onToggle, chil
 interface PermissionItemProps {
   label: string;
   enabled: boolean;
+  permissionKey: string;
+  onToggle?: (permission: string) => void;
 }
 
-function PermissionItem({ label, enabled }: PermissionItemProps) {
+function PermissionItem({ label, enabled, permissionKey, onToggle }: PermissionItemProps) {
+  const handleClick = () => {
+    if (onToggle) {
+      onToggle(permissionKey);
+    }
+  };
+
   return (
-    <div className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] bg-zinc-900 ${enabled ? 'text-green-400' : 'text-zinc-600 opacity-70'}`}>
+    <div
+      className={`flex items-center gap-1.5 px-2 py-1 rounded text-[10px] bg-zinc-900 ${enabled ? 'text-green-400' : 'text-zinc-600 opacity-70'} ${onToggle ? 'cursor-pointer hover:bg-zinc-800' : ''}`}
+      onClick={handleClick}
+    >
       <span className={enabled ? 'text-green-400' : 'text-red-500'}>{enabled ? '✓' : '✗'}</span>
       <span>{label}</span>
     </div>

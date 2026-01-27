@@ -19,6 +19,12 @@ export interface ProcessStatus {
   restartCount: number;
   entry?: string;
   customState: Record<string, unknown>;
+  // Server-provided config
+  capabilities?: Capabilities;
+  showControls?: boolean;
+  interactive?: boolean;
+  inject?: boolean;
+  debug?: boolean;
 }
 
 export interface Capabilities {
@@ -80,6 +86,8 @@ export interface ChatMessage {
     file: string;
     line: number;
   };
+  isWatchTrigger?: boolean;
+  watchPattern?: string;
 }
 
 export interface ToolCall {

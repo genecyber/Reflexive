@@ -590,9 +590,35 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         return;
       }
 
+      // Toggle permissions
+      if (pathname === '/permissions' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        try {
+          const { permission, toggle } = JSON.parse(body);
+          if (toggle && permission && permission in options.capabilities) {
+            const capKey = permission as keyof Capabilities;
+            options.capabilities[capKey] = !options.capabilities[capKey];
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, enabled: options.capabilities[capKey] }));
+          } else {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid permission or toggle not specified' }));
+          }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (e as Error).message }));
+        }
+        return;
+      }
+
       if (pathname === '/state') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(processManager.getState()));
+        res.end(JSON.stringify({
+          ...processManager.getState(),
+          capabilities: options.capabilities,
+          showControls: true
+        }));
         return;
       }
 
@@ -1054,7 +1080,11 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
           isCreated: state.isCreated,
           entry: state.entry,
           uptime: state.startedAt ? Math.floor((Date.now() - state.startedAt) / 1000) : 0,
-          customState: state.customState
+          customState: state.customState,
+          capabilities: options.capabilities,
+          showControls: true,
+          inject: true,
+          debug: false
         }));
         return;
       }

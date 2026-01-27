@@ -7,8 +7,38 @@ interface LogsPanelProps {
   logs: LogEntry[];
   status: ProcessStatus | null;
   showControls: boolean;
+  debugPanelsHeight?: number;
   onAddWatch?: (message: string) => void;
+  onClearLogs?: () => void;
+  onResize?: (height: number) => void;
 }
+
+const INJECT_COLOR_PALETTE = [
+  'border-purple-500 text-purple-500 bg-purple-500/10',
+  'border-pink-500 text-pink-500 bg-pink-500/10',
+  'border-orange-500 text-orange-500 bg-orange-500/10',
+  'border-sky-500 text-sky-500 bg-sky-500/10',
+  'border-emerald-500 text-emerald-500 bg-emerald-500/10',
+  'border-yellow-500 text-yellow-500 bg-yellow-500/10',
+  'border-violet-500 text-violet-500 bg-violet-500/10',
+  'border-cyan-500 text-cyan-500 bg-cyan-500/10',
+  'border-rose-500 text-rose-500 bg-rose-500/10',
+  'border-lime-500 text-lime-500 bg-lime-500/10',
+];
+
+// Map palette colors to text-only colors for log display
+const INJECT_TEXT_COLORS: Record<string, string> = {
+  'border-purple-500 text-purple-500 bg-purple-500/10': 'text-purple-500',
+  'border-pink-500 text-pink-500 bg-pink-500/10': 'text-pink-500',
+  'border-orange-500 text-orange-500 bg-orange-500/10': 'text-orange-500',
+  'border-sky-500 text-sky-500 bg-sky-500/10': 'text-sky-500',
+  'border-emerald-500 text-emerald-500 bg-emerald-500/10': 'text-emerald-500',
+  'border-yellow-500 text-yellow-500 bg-yellow-500/10': 'text-yellow-500',
+  'border-violet-500 text-violet-500 bg-violet-500/10': 'text-violet-500',
+  'border-cyan-500 text-cyan-500 bg-cyan-500/10': 'text-cyan-500',
+  'border-rose-500 text-rose-500 bg-rose-500/10': 'text-rose-500',
+  'border-lime-500 text-lime-500 bg-lime-500/10': 'text-lime-500',
+};
 
 const LOG_TYPE_COLORS: Record<string, string> = {
   stdout: 'text-green-500',
@@ -21,23 +51,124 @@ const LOG_TYPE_COLORS: Record<string, string> = {
   'breakpoint-prompt': 'text-pink-400',
 };
 
-const FILTER_BUTTONS: { key: LogFilter; label: string; color: string }[] = [
-  { key: 'stdout', label: 'stdout', color: 'border-green-500 text-green-500 bg-green-500/10' },
-  { key: 'stderr', label: 'stderr', color: 'border-red-500 text-red-500 bg-red-500/10' },
-  { key: 'system', label: 'system', color: 'border-blue-500 text-blue-500 bg-blue-500/10' },
-  { key: 'inject', label: 'inject', color: 'border-purple-500 text-purple-500 bg-purple-500/10' },
+const LOG_TYPE_DESCRIPTIONS: Record<string, string> = {
+  stdout: 'Standard output from your application',
+  info: 'Standard output from your application',
+  stderr: 'Standard error output from your application',
+  error: 'Standard error output from your application',
+  system: 'Reflexive system messages (start, stop, errors)',
+  debug: 'Reflexive system messages (start, stop, errors)',
+  warn: 'Warning messages from your application',
+  inject: 'Instrumentation logs from injected code',
+  'breakpoint-prompt': 'Interactive breakpoint prompt',
+};
+
+// Convert ANSI escape codes to HTML spans with inline HTML escaping
+// Matches the original JS implementation exactly - processes ANSI codes and escapes HTML inline
+function ansiToHtml(text: string): string {
+  const ansiColors: Record<string, string> = {
+    '30': '#000', '31': '#ef4444', '32': '#22c55e', '33': '#eab308',
+    '34': '#3b82f6', '35': '#a855f7', '36': '#06b6d4', '37': '#e5e5e5',
+    '90': '#737373', '91': '#fca5a5', '92': '#86efac', '93': '#fde047',
+    '94': '#93c5fd', '95': '#d8b4fe', '96': '#67e8f9', '97': '#fff'
+  };
+
+  const ESC = String.fromCharCode(27);
+  let result = '';
+  let openSpans = 0;
+  let i = 0;
+
+  while (i < text.length) {
+    // Check for ANSI escape sequence: ESC[...m
+    if (text[i] === ESC && text[i + 1] === '[') {
+      // Find the end of the sequence (the 'm' character)
+      let j = i + 2;
+      while (j < text.length && /[0-9;]/.test(text[j])) {
+        j++;
+      }
+
+      if (text[j] === 'm') {
+        const codes = text.slice(i + 2, j);
+
+        if (!codes || codes === '0' || codes === '22' || codes === '39') {
+          // Reset - close open span
+          if (openSpans > 0) {
+            result += '</span>';
+            openSpans--;
+          }
+        } else {
+          const parts = codes.split(';');
+          let style = '';
+
+          for (const code of parts) {
+            if (code === '1') style += 'font-weight:bold;';
+            else if (code === '3') style += 'font-style:italic;';
+            else if (code === '4') style += 'text-decoration:underline;';
+            else if (ansiColors[code]) style += 'color:' + ansiColors[code] + ';';
+          }
+
+          if (style) {
+            result += '<span style="' + style + '">';
+            openSpans++;
+          }
+        }
+
+        i = j + 1;
+        continue;
+      }
+    }
+
+    // Escape HTML chars inline (exactly like original)
+    const c = text[i];
+    if (c === '<') result += '&lt;';
+    else if (c === '>') result += '&gt;';
+    else if (c === '&') result += '&amp;';
+    else result += c;
+    i++;
+  }
+
+  // Close any remaining open spans
+  while (openSpans > 0) {
+    result += '</span>';
+    openSpans--;
+  }
+
+  // Convert URLs to clickable links (like original)
+  result = result.replace(/(https?:\/\/[^\s<>"']+)/g, '<a href="$1" target="_blank" rel="noopener" class="text-blue-400 underline hover:text-blue-300">$1</a>');
+
+  return result;
+}
+
+// Process log message using the combined ANSI/HTML/URL processor
+function processLogMessage(message: string): string {
+  return ansiToHtml(message);
+}
+
+const FILTER_BUTTONS: { key: LogFilter; label: string; color: string; description: string }[] = [
+  { key: 'stdout', label: 'stdout', color: 'border-green-500 text-green-500 bg-green-500/10', description: 'Standard output from your application' },
+  { key: 'stderr', label: 'stderr', color: 'border-red-500 text-red-500 bg-red-500/10', description: 'Standard error output from your application' },
+  { key: 'system', label: 'system', color: 'border-blue-500 text-blue-500 bg-blue-500/10', description: 'Reflexive system messages (start, stop, errors)' },
+  { key: 'inject', label: 'inject', color: 'border-purple-500 text-purple-500 bg-purple-500/10', description: 'Instrumentation logs from injected code' },
 ];
 
-export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelProps) {
+export function LogsPanel({ logs, status, showControls, debugPanelsHeight, onAddWatch, onClearLogs, onResize }: LogsPanelProps) {
   const [filterText, setFilterText] = useState('');
   const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set(['stdout', 'stderr', 'system', 'inject', 'info', 'error', 'debug', 'warn']));
   const [isPaused, setIsPaused] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [clearedAt, setClearedAt] = useState<number>(0);
+  const [injectNamespaces, setInjectNamespaces] = useState<Map<string, string>>(new Map());
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Filter logs
+  // Filter logs (also filter by clearedAt timestamp)
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
+      // Skip logs before clear time
+      if (clearedAt > 0 && log.timestamp && new Date(log.timestamp).getTime() < clearedAt) {
+        return false;
+      }
+
       // Type filter
       const typeMatch = typeFilters.has(log.type) ||
         (typeFilters.has('stdout') && log.type === 'info') ||
@@ -49,14 +180,60 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
 
       return typeMatch && textMatch;
     });
-  }, [logs, typeFilters, filterText]);
+  }, [logs, typeFilters, filterText, clearedAt]);
 
-  // Auto-scroll
+  // Scan logs for inject:* namespaces and build color map
+  useEffect(() => {
+    const namespaces = new Map<string, string>();
+    let colorIndex = 0;
+
+    for (const log of logs) {
+      if (log.type.startsWith('inject:')) {
+        const ns = log.type; // e.g., "inject:info", "inject:http"
+        if (!namespaces.has(ns)) {
+          namespaces.set(ns, INJECT_COLOR_PALETTE[colorIndex % INJECT_COLOR_PALETTE.length]);
+          colorIndex++;
+        }
+      }
+    }
+
+    // Only update if namespaces changed
+    if (namespaces.size !== injectNamespaces.size ||
+        ![...namespaces.keys()].every(k => injectNamespaces.has(k))) {
+      setInjectNamespaces(namespaces);
+      // Add discovered namespaces to typeFilters
+      setTypeFilters(prev => {
+        const next = new Set(prev);
+        for (const ns of namespaces.keys()) {
+          next.add(ns);
+        }
+        return next;
+      });
+    }
+  }, [logs]);
+
+  // Auto-scroll when not paused
   useEffect(() => {
     if (!isPaused) {
       logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [filteredLogs, isPaused]);
+
+  // Handle scroll events to auto-toggle pause
+  const handleScroll = () => {
+    const container = logsContainerRef.current;
+    if (!container) return;
+
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 20;
+
+    if (isAtBottom && isPaused) {
+      // User scrolled to bottom - auto-resume
+      setIsPaused(false);
+    } else if (!isAtBottom && !isPaused) {
+      // User scrolled up - auto-pause
+      setIsPaused(true);
+    }
+  };
 
   const toggleFilter = (filter: string) => {
     setTypeFilters(prev => {
@@ -76,7 +253,19 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
   };
 
   const clearLogs = () => {
-    // This would need to call an API to clear logs
+    // Set clearedAt to now to filter out all existing logs
+    setClearedAt(Date.now());
+    // Also call the parent callback if provided
+    onClearLogs?.();
+  };
+
+  // Get color for log type (uses dynamic inject namespace colors)
+  const getLogTypeColor = (type: string): string => {
+    if (type.startsWith('inject:') && injectNamespaces.has(type)) {
+      const paletteColor = injectNamespaces.get(type)!;
+      return INJECT_TEXT_COLORS[paletteColor] || 'text-purple-500';
+    }
+    return LOG_TYPE_COLORS[type] || 'text-zinc-500';
   };
 
   return (
@@ -123,13 +312,15 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
               placeholder="Filter logs..."
-              className="w-36 px-2 py-1 text-xs font-mono bg-zinc-900 border border-zinc-700 rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
+              className="w-36 px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
+              style={{ fontFamily: "'SF Mono', Monaco, monospace" }}
             />
             <div className="flex gap-1.5 flex-wrap">
-              {FILTER_BUTTONS.map(({ key, label, color }) => (
+              {FILTER_BUTTONS.map(({ key, label, color, description }) => (
                 <button
                   key={key}
                   onClick={() => toggleFilter(key)}
+                  title={description}
                   className={`px-2 py-0.5 text-[10px] font-mono rounded-full border transition-opacity ${color} ${
                     typeFilters.has(key) ? 'opacity-100' : 'opacity-30 bg-transparent'
                   }`}
@@ -137,11 +328,29 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
                   {label}
                 </button>
               ))}
+              {/* Dynamic inject namespace buttons */}
+              {[...injectNamespaces.entries()].map(([ns, color]) => (
+                <button
+                  key={ns}
+                  onClick={() => toggleFilter(ns)}
+                  title={`Injected logs: ${ns.replace('inject:', '')}`}
+                  className={`px-2 py-0.5 text-[10px] font-mono rounded-full border transition-opacity ${color} ${
+                    typeFilters.has(ns) ? 'opacity-100' : 'opacity-30 bg-transparent'
+                  }`}
+                >
+                  {ns.replace('inject:', '')}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* Logs list */}
-          <div className="flex-1 overflow-y-auto p-2 font-mono text-[11px]">
+          <div
+            ref={logsContainerRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto p-2 text-[11px]"
+            style={{ fontFamily: "'SF Mono', Monaco, monospace" }}
+          >
             {filteredLogs.map((log, idx) => (
               <div
                 key={idx}
@@ -149,12 +358,16 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
                   log.type === 'breakpoint-prompt' ? 'bg-pink-950/20' : ''
                 }`}
               >
-                <span className={`w-20 flex-shrink-0 text-right pr-2 text-[10px] ${LOG_TYPE_COLORS[log.type] || 'text-zinc-500'}`}>
+                <span
+                  className={`w-20 flex-shrink-0 text-right pr-2 text-[10px] ${getLogTypeColor(log.type)}`}
+                  title={LOG_TYPE_DESCRIPTIONS[log.type] || (log.type.startsWith('inject:') ? `Injected logs: ${log.type.replace('inject:', '')}` : log.type)}
+                >
                   {log.type}
                 </span>
-                <span className="text-zinc-400 whitespace-pre-wrap break-all flex-1">
-                  {log.message}
-                </span>
+                <span
+                  className="text-zinc-400 whitespace-pre-wrap break-all flex-1"
+                  dangerouslySetInnerHTML={{ __html: processLogMessage(log.message) }}
+                />
                 {onAddWatch && (
                   <button
                     onClick={() => onAddWatch(log.message)}
@@ -187,6 +400,32 @@ export function LogsPanel({ logs, status, showControls, onAddWatch }: LogsPanelP
             )}
           </div>
         </>
+      )}
+
+      {/* Vertical Resize Handle */}
+      {onResize && (
+        <div
+          className="h-1.5 cursor-row-resize flex-shrink-0 hover:bg-zinc-700 transition-colors relative group"
+          onMouseDown={(e) => {
+            const startY = e.clientY;
+            const startHeight = debugPanelsHeight || 180;
+
+            const handleMouseMove = (e: MouseEvent) => {
+              const diff = startY - e.clientY;
+              onResize(startHeight + diff);
+            };
+
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove);
+              document.removeEventListener('mouseup', handleMouseUp);
+            };
+
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+          }}
+        >
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-0.5 bg-zinc-700 rounded opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
       )}
     </div>
   );

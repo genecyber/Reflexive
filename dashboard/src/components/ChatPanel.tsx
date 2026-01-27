@@ -1,13 +1,120 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { StatusBadge } from './Header';
+
+// Regex to match tool call patterns: 🔧 **tool_name** (params) or 🔧 **tool_name**
+const TOOL_CALL_REGEX = /🔧 \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?/g;
+
+interface ToolCallInfo {
+  toolName: string;
+  params: string | null;
+  isSendInput: boolean;
+}
+
+// Parse tool calls from message content
+function parseToolCalls(content: string): { segments: Array<{ type: 'text' | 'tool'; content: string; toolInfo?: ToolCallInfo }>; hasToolCalls: boolean } {
+  const segments: Array<{ type: 'text' | 'tool'; content: string; toolInfo?: ToolCallInfo }> = [];
+  let lastIndex = 0;
+  let match;
+  let hasToolCalls = false;
+
+  const regex = new RegExp(TOOL_CALL_REGEX.source, 'g');
+
+  while ((match = regex.exec(content)) !== null) {
+    hasToolCalls = true;
+
+    // Add text before this match
+    if (match.index > lastIndex) {
+      segments.push({
+        type: 'text',
+        content: content.slice(lastIndex, match.index)
+      });
+    }
+
+    const toolName = match[1];
+    const params = match[2] || null;
+    const isSendInput = toolName.toLowerCase() === 'send_input';
+
+    segments.push({
+      type: 'tool',
+      content: match[0],
+      toolInfo: { toolName, params, isSendInput }
+    });
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text
+  if (lastIndex < content.length) {
+    segments.push({
+      type: 'text',
+      content: content.slice(lastIndex)
+    });
+  }
+
+  return { segments, hasToolCalls };
+}
+
+// Tool call badge component
+function ToolCallBadge({ toolInfo }: { toolInfo: ToolCallInfo }) {
+  const baseClasses = "inline-flex items-center gap-2 rounded-lg px-3 py-2 my-2 font-mono text-sm border";
+
+  const colorClasses = toolInfo.isSendInput
+    ? "bg-gradient-to-br from-[#1e3a2f] to-[#0f291a] border-[#22543d]"
+    : "bg-gradient-to-br from-[#1e293b] to-[#0f172a] border-[#334155]";
+
+  const nameColorClass = toolInfo.isSendInput ? "text-green-400" : "text-blue-400";
+
+  return (
+    <span className={`${baseClasses} ${colorClasses}`}>
+      <span className="text-base">⚡</span>
+      <span className={`${nameColorClass} font-semibold`}>{toolInfo.toolName}</span>
+      {toolInfo.params && (
+        <span className="text-slate-400 text-xs max-w-[350px] overflow-hidden text-ellipsis whitespace-nowrap">
+          {toolInfo.params}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Message content renderer with tool call support
+function MessageContent({ content }: { content: string }) {
+  const { segments, hasToolCalls } = useMemo(() => parseToolCalls(content || ''), [content]);
+
+  if (!hasToolCalls) {
+    return (
+      <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:p-3 prose-code:text-xs">
+        <ReactMarkdown>{content || '...'}</ReactMarkdown>
+      </div>
+    );
+  }
+
+  return (
+    <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:p-3 prose-code:text-xs">
+      {segments.map((segment, index) => {
+        if (segment.type === 'tool' && segment.toolInfo) {
+          return (
+            <div key={index} className="not-prose">
+              <ToolCallBadge toolInfo={segment.toolInfo} />
+            </div>
+          );
+        }
+        // Render text segments as markdown
+        return <ReactMarkdown key={index}>{segment.content}</ReactMarkdown>;
+      })}
+    </div>
+  );
+}
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  isWatchTrigger?: boolean;
+  watchPattern?: string;
 }
 
 interface ChatPanelProps {
@@ -77,17 +184,21 @@ export function ChatPanel({
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.map((msg) => (
           <div key={msg.id} className={`${msg.role === 'user' ? 'ml-8' : 'mr-8'}`}>
+            {/* Role label - like original */}
+            <div className="text-[10px] text-zinc-500 mb-1">
+              {msg.isWatchTrigger && msg.role === 'assistant'
+                ? `👁 watch triggered: ${msg.watchPattern?.slice(0, 30) || ''}`
+                : msg.role}
+            </div>
             <div
               className={`p-3 rounded-lg text-sm leading-relaxed ${
                 msg.role === 'user'
-                  ? 'bg-blue-900/50'
-                  : 'bg-zinc-800/80'
-              }`}
+                  ? 'bg-[#1e3a5f]'
+                  : 'bg-[#1a1a24]'
+              } ${msg.isWatchTrigger && msg.role === 'assistant' ? 'border-l-[3px] border-l-blue-500' : ''}`}
             >
               {msg.role === 'assistant' ? (
-                <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-zinc-950 prose-pre:p-3 prose-code:text-xs">
-                  <ReactMarkdown>{msg.content || '...'}</ReactMarkdown>
-                </div>
+                <MessageContent content={msg.content} />
               ) : (
                 <span>{msg.content}</span>
               )}
@@ -177,6 +288,15 @@ export function ChatPanel({
               Send to CLI
             </button>
           </form>
+        )}
+
+        {interactive && inputMode === 'cli' && (
+          <div className="flex items-center mt-2 pt-2 border-t border-zinc-800">
+            <span className="flex items-center gap-2 text-xs text-green-400">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              CLI waiting for input
+            </span>
+          </div>
         )}
 
         {showControls && (
