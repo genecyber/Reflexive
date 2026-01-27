@@ -134,7 +134,10 @@ export type {
 } from './types/mcp.js';
 
 // Library mode entry point
-import { createServer, Server } from 'http';
+import { createServer, Server, ServerResponse } from 'http';
+import { existsSync, readFileSync, statSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { AppState } from './core/app-state.js';
 import { getDashboardHTML } from './core/dashboard.js';
 import { createChatStream, handleSSEResponse } from './core/chat-stream.js';
@@ -142,6 +145,75 @@ import { parseJsonBody, sendJson, parseUrl, addCorsHeaders } from './core/http-s
 import { createLibraryTools } from './mcp/tools.js';
 import { createKnowledgeTools } from './mcp/knowledge-tools.js';
 import type { CustomTool } from './types/index.js';
+
+// Static file serving for Next.js dashboard (library mode)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const DASHBOARD_DIR = join(__dirname, '..', 'dashboard', 'out');
+const DASHBOARD_AVAILABLE = existsSync(DASHBOARD_DIR);
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.json': 'application/json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain',
+};
+
+function serveStaticFile(res: ServerResponse, filePath: string): boolean {
+  try {
+    const ext = filePath.substring(filePath.lastIndexOf('.'));
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+    const data = readFileSync(filePath);
+    const cacheControl = ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable';
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': cacheControl });
+    res.end(data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tryServeDashboard(res: ServerResponse, pathname: string): boolean {
+  if (!DASHBOARD_AVAILABLE) return false;
+
+  // Remove /reflexive prefix to get the file path
+  let relativePath = pathname.replace(/^\/reflexive/, '') || '/';
+
+  // Try exact file match first
+  let filePath = join(DASHBOARD_DIR, relativePath);
+  if (existsSync(filePath) && !filePath.endsWith('/')) {
+    const stat = statSync(filePath);
+    if (stat.isFile()) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try with index.html for directories
+  if (relativePath === '/' || relativePath.endsWith('/')) {
+    filePath = join(DASHBOARD_DIR, relativePath, 'index.html');
+    if (existsSync(filePath)) {
+      return serveStaticFile(res, filePath);
+    }
+  }
+
+  // Try adding .html extension
+  filePath = join(DASHBOARD_DIR, relativePath + '.html');
+  if (existsSync(filePath)) {
+    return serveStaticFile(res, filePath);
+  }
+
+  return false;
+}
 
 // Dynamic import for createSdkMcpServer
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,17 +437,7 @@ ${systemPrompt}`;
 
     const { pathname, searchParams } = parseUrl(req);
 
-    // Dashboard
-    if (pathname === '/reflexive' || pathname === '/reflexive/') {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(getDashboardHTML({
-        title,
-        status: appState.getStatus(),
-        showControls: false
-      }));
-      return;
-    }
-
+    // API endpoints (must be checked before static file serving)
     // Chat endpoint
     if (pathname === '/reflexive/chat' && req.method === 'POST') {
       const { message } = await parseJsonBody<{ message?: string }>(req);
@@ -406,18 +468,88 @@ Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
       return;
     }
 
-    // Status endpoint
+    // Status endpoint (legacy path)
     if (pathname === '/reflexive/status') {
       sendJson(res, appState.getStatus());
       return;
     }
 
-    // Logs endpoint
-    if (pathname === '/reflexive/logs') {
+    // State endpoint (Next.js dashboard uses /state)
+    if (pathname === '/state') {
+      // Return status with library mode flags
+      sendJson(res, {
+        ...appState.getStatus(),
+        isRunning: true,
+        showControls: false,  // Library mode doesn't have process controls
+        capabilities: {
+          readFiles: false,
+          writeFiles: false,
+          shellAccess: false,
+          restart: false,
+          inject: false,
+          eval: false,
+          debug: false
+        }
+      });
+      return;
+    }
+
+    // Logs endpoint (both paths for compatibility)
+    if (pathname === '/reflexive/logs' || pathname === '/logs') {
       const count = parseInt(searchParams.get('count') || '50', 10);
       const type = searchParams.get('type');
       sendJson(res, appState.getLogs(count, type));
       return;
+    }
+
+    // Chat endpoint (without /reflexive prefix for Next.js dashboard)
+    if (pathname === '/chat' && req.method === 'POST') {
+      const { message } = await parseJsonBody<{ message?: string }>(req);
+      if (!message) {
+        sendJson(res, { error: 'message required' }, 400);
+        return;
+      }
+      const status = appState.getStatus();
+      const recentLogs = appState.getLogs(10);
+      const contextSummary = `Application PID: ${status.pid}, uptime: ${status.uptime}s
+Recent logs: ${recentLogs.slice(-3).map(l => l.message).join('; ')}`;
+      try {
+        const mcpSrv = await getMcpServer();
+        const chatStream = createChatStream(message, {
+          contextSummary,
+          systemPrompt: baseSystemPrompt,
+          mcpServer: mcpSrv,
+          mcpServerName: 'reflexive'
+        });
+        await handleSSEResponse(res, chatStream);
+      } catch (error) {
+        sendJson(res, { error: error instanceof Error ? error.message : 'Chat error' }, 500);
+      }
+      return;
+    }
+
+    // Try serving Next.js dashboard static files
+    if (pathname.startsWith('/reflexive') || pathname === '/') {
+      // Redirect root to /reflexive
+      if (pathname === '/') {
+        res.writeHead(302, { Location: '/reflexive' });
+        res.end();
+        return;
+      }
+      // Try Next.js dashboard first
+      if (tryServeDashboard(res, pathname)) {
+        return;
+      }
+      // Fallback to embedded HTML for main dashboard page
+      if (pathname === '/reflexive' || pathname === '/reflexive/') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(getDashboardHTML({
+          title,
+          status: appState.getStatus(),
+          showControls: false
+        }));
+        return;
+      }
     }
 
     // 404
