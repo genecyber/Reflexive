@@ -220,8 +220,8 @@ Reflexive has several capability flags:
 --inject         # Deep instrumentation (console, HTTP, GC)
 --eval           # Runtime code evaluation (DANGEROUS)
 
-# Debugging
---debug          # V8 Inspector debugging
+# Multi-Language Debugging
+--debug          # Enable debugging (V8 Inspector for Node.js, DAP for Python/Go/etc.)
 
 # MCP Server
 --mcp            # Run as MCP server for external AI agents
@@ -231,6 +231,47 @@ Reflexive has several capability flags:
 --watch          # Auto-restart on file changes
 --open           # Open dashboard in browser
 ```
+
+### Debug Python Applications
+
+Reflexive supports debugging Python applications using the Debug Adapter Protocol (DAP):
+
+```bash
+# Install debugpy first
+pip install debugpy
+
+# Create a simple Python app
+cat > app.py << 'EOF'
+def greet(name):
+    message = f"Hello, {name}!"
+    print(message)
+    return message
+
+if __name__ == "__main__":
+    greet("World")
+EOF
+
+# Run with debugging
+npx reflexive --debug app.py
+```
+
+In the dashboard chat:
+```
+You: Set a breakpoint at line 3
+Agent: [debug_set_breakpoint: file="app.py", line=3]
+       Breakpoint set.
+
+You: Run the app again
+Agent: [restart_process]
+       ... breakpoint hits ...
+
+       Breakpoint hit at app.py:3
+       Variables:
+       - name: "World"
+       - message: "Hello, World!"
+```
+
+Supported languages: Node.js, Python, Go, .NET, Rust. See [User Guide](./user-guide.md#multi-language-debugging) for details.
 
 ### Try Library Mode
 

@@ -1,6 +1,6 @@
 # Reflexive Documentation
 
-Welcome to the Reflexive documentation. This is the comprehensive documentation for Reflexive, an AI-powered introspection framework for Node.js applications.
+Welcome to the Reflexive documentation. This is the comprehensive documentation for Reflexive, an AI-powered introspection framework for applications in multiple languages.
 
 ## Table of Contents
 
@@ -15,14 +15,14 @@ Welcome to the Reflexive documentation. This is the comprehensive documentation 
 
 ## Overview
 
-Reflexive enables building applications by talking to them. It embeds a Claude AI agent that lives inside your running Node.js application, capable of seeing logs, reading source files, setting breakpoints, and modifying code through chat conversation.
+Reflexive enables building applications by talking to them. It embeds a Claude AI agent that lives inside your running application, capable of seeing logs, reading source files, setting breakpoints, and modifying code through chat conversation.
 
 ## What is Reflexive?
 
-Reflexive combines the Claude Agent SDK with your Node.js process to create an intelligent development assistant that can:
+Reflexive combines the Claude Agent SDK with your application process to create an intelligent development assistant that can:
 
 - Monitor and analyze application behavior in real-time
-- Debug issues using V8 Inspector protocol integration
+- Debug issues using V8 Inspector (Node.js) or Debug Adapter Protocol (Python, Go, .NET, Rust)
 - Read and modify source code with explicit permissions
 - Execute shell commands when authorized
 - Watch for specific log patterns and respond automatically
@@ -42,10 +42,12 @@ Think of it as Claude Code embedded directly in your application, with full acce
 - **Hot Reload**: Automatic restart on file changes with `--watch`
 - **Interactive Mode**: Proxy stdin/stdout for CLI applications
 
-### Advanced Debugging
-- **V8 Inspector**: Real breakpoints, stepping, scope inspection
+### Multi-Language Debugging
+- **V8 Inspector**: Node.js/TypeScript debugging with breakpoints, stepping, scope inspection
+- **Debug Adapter Protocol**: Python (debugpy), Go (Delve), .NET (netcoredbg), Rust (CodeLLDB)
+- **Breakpoint Prompts**: Attach AI prompts to breakpoints that trigger automatically when hit
 - **Watch Triggers**: Pattern-match logs and auto-prompt the agent
-- **Deep Instrumentation**: Optional injection for diagnostics, GC stats, HTTP tracking
+- **Deep Instrumentation**: Optional injection for diagnostics, GC stats, HTTP tracking (Node.js)
 
 ### Safety & Permissions
 - **Read-Only by Default**: No file modifications without explicit flags
@@ -58,9 +60,16 @@ Reflexive supports three distinct operating modes:
 
 ### 1. Local Mode (Default)
 ```bash
+# Node.js
 reflexive app.js
+
+# Python (requires debugpy for --debug)
+reflexive app.py
+
+# Go (requires Delve for --debug)
+reflexive main.go
 ```
-Spawns and monitors your application as a child process. Full feature support including file watching, debugging, and injection.
+Spawns and monitors your application as a child process. Full feature support including file watching and multi-language debugging. Injection mode available for Node.js.
 
 ### 2. Sandbox Mode
 ```bash

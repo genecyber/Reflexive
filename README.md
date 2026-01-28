@@ -293,13 +293,27 @@ const r = makeReflexive({
 });
 ```
 
-## V8 Debugger
+## Multi-Language Debugging
 
-With `--debug`, the agent can set real breakpoints:
+With `--debug`, the agent can set real breakpoints and step through code. Reflexive supports multiple languages through the Debug Adapter Protocol (DAP):
+
+| Language | Extension | Debugger | Install |
+|----------|-----------|----------|---------|
+| Node.js | `.js`, `.ts` | V8 Inspector | Built-in |
+| Python | `.py` | debugpy | `pip install debugpy` |
+| Go | `.go` | Delve | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| .NET | `.cs` | netcoredbg | See [netcoredbg releases](https://github.com/Samsung/netcoredbg/releases) |
+| Rust | `.rs` | CodeLLDB | `cargo install codelldb` |
+
+### Node.js Debugging
+
+```bash
+npx reflexive --debug ./server.js
+```
 
 ```
 You: "Set a breakpoint on line 42 of server.js"
-Agent: [set_v8_breakpoint: file="server.js", line=42]
+Agent: [debug_set_breakpoint: file="server.js", line=42]
        Breakpoint set.
 
 ... request comes in ...
@@ -315,13 +329,55 @@ Agent: Breakpoint hit at server.js:42
        - user: { id: 123, name: "Alice" }
 
 You: "What's in user.permissions?"
-Agent: [evaluate_at_breakpoint: "user.permissions"]
+Agent: [debug_evaluate: "user.permissions"]
        ["read", "write", "admin"]
 
 You: "Step into the next function"
-Agent: [debugger_step_into]
+Agent: [debug_step_into]
        Stepped to validateUser (auth.js:55)
 ```
+
+### Python Debugging
+
+```bash
+# First, install debugpy
+pip install debugpy
+
+# Then run your Python app with debugging
+npx reflexive --debug ./app.py
+```
+
+```
+You: "Set a breakpoint at line 15 in app.py"
+Agent: [debug_set_breakpoint: file="app.py", line=15]
+       Breakpoint set.
+
+You: "What variables are in scope?"
+Agent: [debug_get_scope_variables]
+       - request: <Request object>
+       - user_id: 42
+       - db_session: <Session object>
+
+You: "Evaluate db_session.query(User).count()"
+Agent: [debug_evaluate: "db_session.query(User).count()"]
+       127
+```
+
+### Breakpoint Prompts
+
+Set breakpoints with AI prompts that trigger automatically when hit:
+
+```
+You: "Set a breakpoint on line 50 with prompt 'Analyze the request object'"
+Agent: [debug_set_breakpoint: file="server.js", line=50, prompt="Analyze the request object"]
+       Breakpoint with prompt set.
+
+... breakpoint hits ...
+
+Agent: Analyzing the request object at server.js:50...
+       The request is a POST to /api/users with body containing
+       email and password fields. The password appears to be
+       unhashed - this may be a security concern.
 
 ## Watch Triggers
 

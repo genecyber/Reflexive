@@ -644,16 +644,37 @@ export default {
 
 ## Advanced Features
 
-### V8 Debugger
+### Multi-Language Debugging
 
-Real breakpoint debugging with the V8 Inspector protocol.
+Reflexive supports debugging across multiple programming languages through a unified interface. For Node.js, it uses the V8 Inspector Protocol. For Python, Go, .NET, and Rust, it uses the Debug Adapter Protocol (DAP).
 
-#### Enabling
+#### Supported Languages
+
+| Language | Extensions | Debugger | Prerequisites |
+|----------|------------|----------|---------------|
+| **Node.js** | `.js`, `.mjs`, `.cjs`, `.ts` | V8 Inspector | None (built-in) |
+| **Python** | `.py`, `.pyw` | debugpy | `pip install debugpy` |
+| **Go** | `.go` | Delve | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| **.NET** | `.cs`, `.vb`, `.fsx` | netcoredbg | [Install netcoredbg](https://github.com/Samsung/netcoredbg/releases) |
+| **Rust** | `.rs` | CodeLLDB | Install via VS Code or `cargo install codelldb` |
+
+Reflexive automatically detects the language based on file extension and uses the appropriate debugger.
+
+#### Enabling Debugging
+
 ```bash
+# Node.js
 reflexive --debug app.js
+
+# Python
+reflexive --debug app.py
+
+# Go (must be in a Go module directory)
+reflexive --debug main.go
 ```
 
 #### Setting Breakpoints
+
 ```
 You: "Set a breakpoint on line 42 of server.js"
 
@@ -661,7 +682,10 @@ Agent: [debug_set_breakpoint: file="server.js", line=42]
 Breakpoint set at server.js:42
 ```
 
+Breakpoints persist across process restarts, so you don't lose them when your app crashes or you restart it.
+
 #### When Breakpoint Hits
+
 ```
 Agent: Breakpoint hit at server.js:42 in handleRequest
 
@@ -677,6 +701,7 @@ Local Variables:
 ```
 
 #### Evaluation
+
 ```
 You: "What's in user.permissions?"
 
@@ -684,13 +709,91 @@ Agent: [debug_evaluate: "user.permissions"]
 ["read", "write", "admin"]
 ```
 
+Works in any supported language:
+- **Node.js**: JavaScript expressions
+- **Python**: Python expressions (e.g., `len(users)`, `db.query(User).all()`)
+- **Go**: Go expressions (e.g., `len(slice)`, `user.Name`)
+
 #### Stepping
+
 ```
 You: "Step into the next function"
 
 Agent: [debug_step_into]
 Stepped to validateUser at auth.js:55
 ```
+
+All step commands available: `debug_step_over`, `debug_step_into`, `debug_step_out`
+
+#### Breakpoint Prompts
+
+You can attach an AI prompt to a breakpoint that triggers automatically when hit:
+
+```
+You: "Set a breakpoint at line 50 with prompt 'Analyze why this function was called'"
+
+Agent: [debug_set_breakpoint: file="handler.py", line=50, prompt="Analyze why this function was called"]
+Breakpoint with prompt set at handler.py:50
+```
+
+When the breakpoint is hit, the AI automatically receives context about the call stack and variables, then responds based on your prompt. This is powerful for:
+- Automated debugging sessions
+- Learning how code flows
+- Catching specific conditions
+
+#### Python Debugging Example
+
+```bash
+# Install debugpy first
+pip install debugpy
+
+# Run your Flask app with debugging
+reflexive --debug app.py
+```
+
+```
+You: "Set a breakpoint in the /users endpoint"
+
+Agent: [read_file: path="app.py"]
+Found the /users endpoint at line 25.
+
+[debug_set_breakpoint: file="app.py", line=25]
+Breakpoint set at app.py:25
+
+You: [make a request to /users]
+
+Agent: Breakpoint hit at app.py:25 in get_users
+
+Call Stack:
+1. get_users (app.py:25)
+2. dispatch_request (flask/app.py:1500)
+
+Local Variables:
+- request: <Request 'http://localhost:5000/users'>
+- db: <SQLAlchemy engine>
+
+You: "What's the current user's email?"
+
+Agent: [debug_evaluate: "request.headers.get('X-User-Email')"]
+"alice@example.com"
+```
+
+#### Debug Tools Reference
+
+| Tool | Description |
+|------|-------------|
+| `debug_set_breakpoint` | Set breakpoint at file:line (optional: condition, prompt) |
+| `debug_remove_breakpoint` | Remove breakpoint by ID or file:line |
+| `debug_list_breakpoints` | List all active breakpoints |
+| `debug_resume` | Resume execution after hitting breakpoint |
+| `debug_pause` | Pause execution at current point |
+| `debug_step_over` | Step over current line |
+| `debug_step_into` | Step into function call |
+| `debug_step_out` | Step out of current function |
+| `debug_get_call_stack` | Get current call stack |
+| `debug_get_scope_variables` | Get variables in current scope |
+| `debug_evaluate` | Evaluate expression in current context |
+| `debug_get_state` | Get debugger connection status |
 
 ### Watch Triggers
 

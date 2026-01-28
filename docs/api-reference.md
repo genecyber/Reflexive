@@ -178,19 +178,38 @@ When running as an MCP server, these tools are exposed to connected clients:
 
 #### Debug Tools (with `--debug`)
 
+Multi-language debugging is supported via V8 Inspector (Node.js) and Debug Adapter Protocol (Python, Go, .NET, Rust).
+
+**Supported Languages:**
+| Language | Extensions | Debugger | Prerequisites |
+|----------|------------|----------|---------------|
+| Node.js | `.js`, `.ts` | V8 Inspector | None |
+| Python | `.py` | debugpy | `pip install debugpy` |
+| Go | `.go` | Delve | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| .NET | `.cs`, `.vb` | netcoredbg | [netcoredbg releases](https://github.com/Samsung/netcoredbg/releases) |
+| Rust | `.rs` | CodeLLDB | `cargo install codelldb` |
+
+**Debug Tools:**
 | Tool | Description |
 |------|-------------|
-| `debug_set_breakpoint` | Set V8 debugger breakpoint |
-| `debug_remove_breakpoint` | Remove breakpoint |
-| `debug_list_breakpoints` | List all breakpoints |
+| `debug_set_breakpoint` | Set breakpoint at file:line (supports optional condition and prompt) |
+| `debug_remove_breakpoint` | Remove breakpoint by ID or file:line |
+| `debug_list_breakpoints` | List all breakpoints (persists across restarts) |
 | `debug_resume` | Resume from breakpoint |
 | `debug_pause` | Pause execution |
 | `debug_step_over` | Step over current line |
 | `debug_step_into` | Step into function |
 | `debug_step_out` | Step out of function |
-| `debug_get_call_stack` | Get current call stack |
-| `debug_evaluate` | Evaluate expression at breakpoint |
+| `debug_get_call_stack` | Get current call stack (works in any language) |
+| `debug_evaluate` | Evaluate expression at breakpoint (language-specific syntax) |
 | `debug_get_scope_variables` | Get variables in scope |
+| `debug_get_state` | Get debugger connection and pause status |
+
+**Breakpoint Prompts:**
+Attach an AI prompt to breakpoints that triggers automatically when hit:
+```
+[debug_set_breakpoint: file="app.py", line=25, prompt="Analyze this request"]
+```
 
 #### Eval Tools (with `--eval`)
 
@@ -1283,48 +1302,102 @@ Send stdin to interactive process.
 
 ### Debug Tools
 
-Available with `--debug` flag.
+Available with `--debug` flag. Supports multi-language debugging via V8 Inspector (Node.js) and Debug Adapter Protocol (Python, Go, .NET, Rust).
+
+#### Supported Languages
+
+| Language | File Extensions | Debugger | Installation |
+|----------|----------------|----------|--------------|
+| Node.js | `.js`, `.mjs`, `.cjs`, `.ts` | V8 Inspector | Built-in |
+| Python | `.py`, `.pyw` | debugpy | `pip install debugpy` |
+| Go | `.go` | Delve (dlv) | `go install github.com/go-delve/delve/cmd/dlv@latest` |
+| .NET | `.cs`, `.vb`, `.fsx` | netcoredbg | [netcoredbg releases](https://github.com/Samsung/netcoredbg/releases) |
+| Rust | `.rs` | CodeLLDB | `cargo install codelldb` |
+
+Reflexive automatically detects the language based on file extension.
 
 #### debug_set_breakpoint
-Set a breakpoint.
+Set a breakpoint at a specific line.
 
 **Parameters**:
-- `file` (string, required): File path
+- `file` (string, required): File path (relative or absolute)
 - `line` (number, required): Line number
+- `condition` (string, optional): Conditional expression (breakpoint only hits when true)
+- `prompt` (string, optional): AI prompt to execute when breakpoint hits
+
+**Example**:
+```
+[debug_set_breakpoint: file="app.py", line=25, prompt="Analyze why this was called"]
+```
+
+Breakpoints persist across process restarts.
 
 #### debug_remove_breakpoint
 Remove a breakpoint.
 
 **Parameters**:
-- `file` (string, required): File path
-- `line` (number, required): Line number
+- `id` (string, optional): Breakpoint ID
+- `file` (string, optional): File path (used with line)
+- `line` (number, optional): Line number (used with file)
+
+Provide either `id` OR both `file` and `line`.
+
+#### debug_list_breakpoints
+List all active breakpoints with their IDs, locations, conditions, and hit counts.
 
 #### debug_resume
 Resume execution from paused state.
 
 #### debug_pause
-Pause execution.
+Pause execution at current point.
 
 #### debug_step_over
-Step over function call.
+Step over the current line (executes function calls without stepping into them).
 
 #### debug_step_into
-Step into function.
+Step into the next function call.
 
 #### debug_step_out
-Step out of current function.
+Step out of the current function (continue until function returns).
 
 #### debug_get_call_stack
 Get current call stack when paused.
 
+**Returns**: Array of stack frames with:
+- `name`: Function name
+- `source.path`: Source file path
+- `line`: Line number
+- `column`: Column number
+
+Works with all supported languages.
+
 #### debug_evaluate
-Evaluate expression at breakpoint.
+Evaluate an expression in the current debugger context.
 
 **Parameters**:
-- `expression` (string, required): JavaScript expression
+- `expression` (string, required): Expression to evaluate
+  - **Node.js**: JavaScript expression (e.g., `user.name`, `JSON.stringify(config)`)
+  - **Python**: Python expression (e.g., `len(users)`, `request.headers`)
+  - **Go**: Go expression (e.g., `len(slice)`, `user.Name`)
+
+**Returns**: Result of evaluation with type information.
 
 #### debug_get_scope_variables
-Get variables in current scope.
+Get all variables in the current scope when paused.
+
+**Returns**: Variables organized by scope:
+- `local`: Local variables in current function
+- `closure`: Variables captured from outer scopes
+- `global`: Global/module-level variables
+
+#### debug_get_state
+Get debugger connection status.
+
+**Returns**:
+- `enabled`: Whether debugging is enabled
+- `connected`: Whether debugger is connected
+- `paused`: Whether execution is currently paused
+- `runtime`: Detected language runtime (node, python, go, etc.)
 
 ### Sandbox Tools
 
