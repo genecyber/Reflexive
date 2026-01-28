@@ -127,6 +127,9 @@ export class ProcessManager {
   // Queue of triggered breakpoint prompts for dashboard to consume
   private triggeredBreakpointPrompts: TriggeredBreakpointPrompt[] = [];
 
+  // Cached call stack from last pause event (for synchronous access)
+  private cachedCallStack: StackFrame[] | null = null;
+
   // State from child makeReflexive() instances (parent-child coordination)
   private clientState: Record<string, unknown> = {};
 
@@ -685,13 +688,16 @@ export class ProcessManager {
           return; // Don't emit this pause to dashboard
         }
 
+        // Cache the call stack for synchronous access (dashboard polling)
+        this.cachedCallStack = await this.debugAdapter?.getCallStack().catch(() => []) || [];
+
         // Check if any hit breakpoint has a prompt to trigger
         let hitBpIds = pauseData.hitBreakpointIds || [];
 
         // Fallback: if reason is 'breakpoint' but no hitBreakpointIds provided,
         // try to match by location from the call stack
         if (hitBpIds.length === 0 && pauseData.reason === 'breakpoint') {
-          const callFrames = await this.debugAdapter?.getCallStack().catch(() => []) || [];
+          const callFrames = this.cachedCallStack;
           if (callFrames.length > 0) {
             const topFrame = callFrames[0];
             const frameLine = topFrame.line;
@@ -714,8 +720,8 @@ export class ProcessManager {
             if (bp && bp.prompt && bp.promptEnabled) {
               bp.hitCount = (bp.hitCount || 0) + 1;
 
-              // Get call stack for the prompt
-              const callFrames = await this.debugAdapter?.getCallStack().catch(() => []) || [];
+              // Use cached call stack for the prompt
+              const callFrames = this.cachedCallStack || [];
 
               // Queue the prompt for the dashboard to consume
               this.triggeredBreakpointPrompts.push({
@@ -735,6 +741,7 @@ export class ProcessManager {
 
       this.debugAdapter.on('resumed', () => {
         this._log('debug', 'Debugger resumed');
+        this.cachedCallStack = null; // Clear cached call stack
         this.emit('debuggerResumed', {});
       });
 
@@ -974,15 +981,14 @@ export class ProcessManager {
   }
 
   /**
-   * Get current call stack
+   * Get current call stack (synchronous - uses cached value from pause event)
    */
   debugGetCallStack(): StackFrame[] | null {
     if (!this.debugAdapter || !this.debugAdapter.isPaused()) {
       return null;
     }
-    // Return cached call stack or empty
-    // Note: The new adapter is async, so we cache the call stack on pause events
-    return null; // Will be populated via events
+    // Return cached call stack (populated in paused event handler)
+    return this.cachedCallStack;
   }
 
   /**
