@@ -372,7 +372,7 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
           }
 
           const formatted = callStack.map((frame, i) =>
-            `#${i} ${frame.functionName} at ${frame.url}:${frame.lineNumber}`
+            `#${i} ${frame.name} at ${frame.source?.path || 'unknown'}:${frame.line}`
           ).join('\n');
 
           return textResult(`Call Stack:\n\n${formatted}`);

@@ -91,3 +91,4 @@ export interface StorageConfig {
 export * from './sandbox.js';
 export * from './manager.js';
 export * from './mcp.js';
+export * from './debug.js';

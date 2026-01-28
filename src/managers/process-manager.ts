@@ -1,16 +1,29 @@
 /**
  * ProcessManager - Manages external child processes for CLI mode
  *
- * This class spawns and controls Node.js child processes,
- * capturing their output, handling IPC for injection, and
- * providing V8 debugging capabilities.
+ * This class spawns and controls child processes for multiple languages,
+ * capturing their output, handling IPC for injection (Node.js only), and
+ * providing debugging capabilities via language-specific adapters.
+ *
+ * Supported languages:
+ * - Node.js (.js, .ts, etc.) - V8 Inspector Protocol
+ * - Python (.py) - debugpy via DAP
+ * - Go (.go) - Delve via DAP
+ * - .NET (.cs, .dll) - netcoredbg via DAP
+ * - Rust (.rs) - CodeLLDB via DAP
  */
 
 import { spawn, ChildProcess } from 'child_process';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
-import { RemoteDebugger, BreakpointInfo, CallFrame } from './remote-debugger.js';
+import type { DebugAdapter, BreakpointInfo, StackFrame, LanguageRuntime, DebugConnectionOptions } from '../types/debug.js';
+import { V8InspectorAdapter } from '../adapters/v8-inspector-adapter.js';
+import { runtimeRegistry, findAvailablePort } from '../runtimes/index.js';
 import type { LogEntry, ProcessState, EventHandler } from '../types/index.js';
+
+// Legacy re-export for backward compatibility
+export type { BreakpointInfo };
+export type CallFrame = StackFrame;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -29,16 +42,21 @@ export interface ProcessManagerOptions {
   };
 }
 
-export interface PersistedBreakpoint extends BreakpointInfo {
+export interface PersistedBreakpoint {
+  id: string;
+  file: string;
+  line: number;
+  condition: string | null;
   enabled: boolean;
   prompt: string;
   promptEnabled: boolean;
   hitCount: number;
+  locations?: unknown[];
 }
 
 export interface TriggeredBreakpointPrompt {
   breakpoint: PersistedBreakpoint;
-  callFrames: CallFrame[];
+  callFrames: StackFrame[];
   timestamp: number;
 }
 
@@ -95,11 +113,13 @@ export class ProcessManager {
   private evalCallbacks = new Map<number, EvalCallback>();
   private evalIdCounter = 0;
 
-  // V8 Inspector debugging
+  // Multi-language debugging
   private debug: boolean;
-  private debugger: RemoteDebugger | null = null;
-  private inspectorUrl: string | null = null;
+  private debugAdapter: DebugAdapter | null = null;
+  private debugConnectionInfo: string | null = null;  // URL or host:port
   private debuggerReady = false;
+  private currentRuntime: LanguageRuntime | null = null;
+  private debugPort: number = 0;
 
   // Persisted breakpoints survive restarts
   private persistedBreakpoints: PersistedBreakpoint[] = [];
@@ -214,52 +234,101 @@ export class ProcessManager {
       this.options.cliPort = cliPort;
     }
 
-    // Build node args, adding --require for injection if enabled
-    const nodeArgs = [...(this.options.nodeArgs || [])];
-    if (this.inject) {
-      const injectPath = resolve(__dirname, '..', '..', 'src', 'inject.cjs');
-      nodeArgs.unshift('--require', injectPath);
+    // Start async to handle port allocation
+    this._startAsync(cliPort).catch((err) => {
+      this._log('error', `Failed to start process: ${err.message}`);
+    });
+  }
+
+  /**
+   * Async implementation of start()
+   */
+  private async _startAsync(cliPort?: number): Promise<void> {
+    if (!this.entry) return;
+
+    // Detect runtime based on file extension
+    const ext = extname(this.entry);
+    this.currentRuntime = runtimeRegistry.getByExtension(ext) || null;
+
+    // Determine if this is Node.js (supports injection and IPC)
+    const isNodeRuntime = this.currentRuntime?.name === 'node' || !this.currentRuntime;
+    const runtimeName = this.currentRuntime?.displayName || 'Node.js';
+
+    // Allocate debug port if debugging is enabled
+    if (this.debug && this.currentRuntime) {
+      this.debugPort = await findAvailablePort(this.currentRuntime.defaultPort);
     }
 
-    // Add V8 Inspector flag if debugging is enabled
-    if (this.debug) {
-      // Use --inspect-brk=0 to pause on first line and use random port
-      nodeArgs.unshift('--inspect-brk=0');
-    }
+    let command: string;
+    let args: string[];
+    let env: Record<string, string | undefined> = { ...process.env, FORCE_COLOR: '1' };
 
-    const args = [...nodeArgs, this.entry, ...(this.options.appArgs || [])];
+    if (isNodeRuntime) {
+      // Node.js runtime - use existing logic with injection support
+      command = process.execPath;
+      const nodeArgs = [...(this.options.nodeArgs || [])];
+
+      if (this.inject) {
+        const injectPath = resolve(__dirname, '..', '..', 'src', 'inject.cjs');
+        nodeArgs.unshift('--require', injectPath);
+        env.REFLEXIVE_INJECT = 'true';
+      }
+      if (this.options.eval) {
+        env.REFLEXIVE_EVAL = 'true';
+      }
+      if (this.debug) {
+        nodeArgs.unshift(`--inspect-brk=${this.debugPort}`);
+      }
+      if (this.options.cliPort) {
+        env.REFLEXIVE_CLI_MODE = 'true';
+        env.REFLEXIVE_CLI_PORT = String(this.options.cliPort);
+      }
+
+      args = [...nodeArgs, this.entry, ...(this.options.appArgs || [])];
+    } else if (this.currentRuntime) {
+      // Other runtimes - use runtime configuration
+      command = this.currentRuntime.command;
+
+      if (this.debug) {
+        args = this.currentRuntime.buildArgs(this.debugPort, this.entry, this.options.appArgs);
+      } else {
+        // Non-debug mode: just run the file directly
+        args = [this.entry, ...(this.options.appArgs || [])];
+      }
+
+      // Add runtime-specific environment variables
+      if (this.currentRuntime.buildEnv) {
+        Object.assign(env, this.currentRuntime.buildEnv(this.debugPort));
+      }
+
+      // Disable injection for non-Node runtimes
+      if (this.inject) {
+        this._log('system', `[warn] Injection not supported for ${runtimeName}, disabling`);
+        this.inject = false;
+      }
+    } else {
+      // Fallback to Node.js
+      command = process.execPath;
+      args = [this.entry, ...(this.options.appArgs || [])];
+    }
 
     // In interactive mode, pipe stdin so we can send input programmatically
     const stdinMode = this.interactive ? 'pipe' : 'inherit';
 
-    // Add IPC channel if injection is enabled
-    const stdio: ('pipe' | 'inherit' | 'ipc')[] = this.inject
+    // Add IPC channel if injection is enabled (Node.js only)
+    const stdio: ('pipe' | 'inherit' | 'ipc')[] = this.inject && isNodeRuntime
       ? [stdinMode, 'pipe', 'pipe', 'ipc']
       : [stdinMode, 'pipe', 'pipe'];
 
-    // Set up environment for injection and CLI coordination
-    const env: Record<string, string | undefined> = { ...process.env, FORCE_COLOR: '1' };
-    if (this.inject) {
-      env.REFLEXIVE_INJECT = 'true';
-    }
-    if (this.options.eval) {
-      env.REFLEXIVE_EVAL = 'true';
-    }
-    // Enable parent-child coordination: if app uses makeReflexive(), it will connect to CLI instead
-    if (this.options.cliPort) {
-      env.REFLEXIVE_CLI_MODE = 'true';
-      env.REFLEXIVE_CLI_PORT = String(this.options.cliPort);
-    }
-
     // Reset debugger state
-    if (this.debugger) {
-      this.debugger.disconnect();
-      this.debugger = null;
+    if (this.debugAdapter) {
+      this.debugAdapter.disconnect();
+      this.debugAdapter = null;
     }
-    this.inspectorUrl = null;
+    this.debugConnectionInfo = null;
     this.debuggerReady = false;
 
-    this.child = spawn(process.execPath, args, {
+    this.child = spawn(command, args, {
       cwd: this.cwd,
       env,
       stdio
@@ -271,12 +340,18 @@ export class ProcessManager {
     this.waitingForInput = false;
     this.pendingOutput = '';
 
-    this._log('system', `Started: node ${args.join(' ')}${this.interactive ? ' (interactive mode)' : ''}`);
+    const debugInfo = this.debug ? ` [debug:${this.debugPort}]` : '';
+    this._log('system', `Started (${runtimeName}): ${command} ${args.join(' ')}${debugInfo}${this.interactive ? ' (interactive)' : ''}`);
 
     this.child.stdout?.on('data', (data: Buffer) => {
       const text = data.toString();
       process.stdout.write(text);
       this._log('stdout', text.trim());
+
+      // Check for debug ready signal
+      if (this.debug && !this.debugConnectionInfo && this.currentRuntime) {
+        this._checkDebugReady(text);
+      }
 
       if (this.interactive) {
         this._handleInteractiveOutput(text, 'stdout');
@@ -288,13 +363,9 @@ export class ProcessManager {
       process.stderr.write(text);
       this._log('stderr', text.trim());
 
-      // Parse V8 Inspector URL from stderr when debugging
-      if (this.debug && !this.inspectorUrl) {
-        const match = text.match(/ws:\/\/[\d.]+:\d+\/[\w-]+/);
-        if (match) {
-          this.inspectorUrl = match[0];
-          this._connectDebugger(this.inspectorUrl);
-        }
+      // Check for debug ready signal (often on stderr)
+      if (this.debug && !this.debugConnectionInfo && this.currentRuntime) {
+        this._checkDebugReady(text);
       }
 
       if (this.interactive) {
@@ -308,22 +379,20 @@ export class ProcessManager {
       this._log('system', `Exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`);
 
       // Clean up debugger connection
-      if (this.debugger) {
-        this.debugger.disconnect();
-        this.debugger = null;
+      if (this.debugAdapter) {
+        this.debugAdapter.disconnect();
+        this.debugAdapter = null;
         this.debuggerReady = false;
-        this.inspectorUrl = null;
+        this.debugConnectionInfo = null;
       }
-
-      // Auto-restart removed - was part of --watch feature which has been removed
     });
 
     this.child.on('error', (err: Error) => {
       this._log('error', `Process error: ${err.message}`);
     });
 
-    // Handle IPC messages from injected child process
-    if (this.inject) {
+    // Handle IPC messages from injected child process (Node.js only)
+    if (this.inject && isNodeRuntime) {
       this.child.on('message', (msg: unknown) => {
         const message = msg as InjectedMessage;
         if (!message || !message.reflexive) return;
@@ -554,41 +623,60 @@ export class ProcessManager {
   }
 
   /**
-   * Connect to V8 Inspector debugger
+   * Check if debug output indicates the debugger is ready
    */
-  private async _connectDebugger(wsUrl: string): Promise<void> {
-    try {
-      this.debugger = new RemoteDebugger();
+  private _checkDebugReady(output: string): void {
+    if (!this.currentRuntime || this.debugConnectionInfo) return;
 
-      // Track whether we're waiting for the initial --inspect-brk pause
-      let waitingForInitialPause = true;
+    const connectionOptions = this.currentRuntime.parseDebugReady(output, this.debugPort);
+    if (connectionOptions) {
+      this._connectDebugger(connectionOptions);
+    }
+  }
+
+  /**
+   * Connect to the debug adapter (V8 Inspector or DAP)
+   */
+  private async _connectDebugger(options: DebugConnectionOptions): Promise<void> {
+    if (!this.currentRuntime) return;
+
+    try {
+      // Create the appropriate adapter for this runtime
+      this.debugAdapter = this.currentRuntime.createAdapter();
+
+      // Track whether we're waiting for the initial pause (Node.js --inspect-brk)
+      let waitingForInitialPause = this.currentRuntime.protocol === 'v8-inspector';
 
       // Forward debugger events
-      this.debugger.on('paused', (data: unknown) => {
-        const pauseData = data as { reason: string; hitBreakpoints?: string[]; callFrames: CallFrame[] };
-        this._log('debug', `Debugger paused: ${pauseData.reason}${pauseData.hitBreakpoints?.length ? ` at ${pauseData.hitBreakpoints.join(', ')}` : ''}`);
+      this.debugAdapter.on('paused', async (data: unknown) => {
+        const pauseData = data as { reason: string; hitBreakpointIds?: string[]; threadId?: number };
+        this._log('debug', `Debugger paused: ${pauseData.reason}${pauseData.hitBreakpointIds?.length ? ` at ${pauseData.hitBreakpointIds.join(', ')}` : ''}`);
 
-        // Auto-resume from initial --inspect-brk pause ("Break on start")
-        if (waitingForInitialPause && pauseData.reason === 'Break on start') {
+        // Auto-resume from initial --inspect-brk pause ("entry" in our normalized events)
+        if (waitingForInitialPause && (pauseData.reason === 'entry' || pauseData.reason === 'Break on start')) {
           waitingForInitialPause = false;
           this._log('debug', 'Auto-resuming from initial break on start');
           // Resume asynchronously to not block the event handler
-          this.debugger?.resume().catch((err: Error) => {
+          this.debugAdapter?.resume().catch((err: Error) => {
             this._log('debug', `Auto-resume error (non-critical): ${err.message}`);
           });
           return; // Don't emit this pause to dashboard
         }
 
         // Check if any hit breakpoint has a prompt to trigger
-        if (pauseData.hitBreakpoints && pauseData.hitBreakpoints.length > 0) {
-          for (const bpId of pauseData.hitBreakpoints) {
+        if (pauseData.hitBreakpointIds && pauseData.hitBreakpointIds.length > 0) {
+          for (const bpId of pauseData.hitBreakpointIds) {
             const bp = this.persistedBreakpoints.find(b => b.id === bpId);
             if (bp && bp.prompt && bp.promptEnabled) {
               bp.hitCount = (bp.hitCount || 0) + 1;
+
+              // Get call stack for the prompt
+              const callFrames = await this.debugAdapter?.getCallStack().catch(() => []) || [];
+
               // Queue the prompt for the dashboard to consume
               this.triggeredBreakpointPrompts.push({
                 breakpoint: { ...bp },
-                callFrames: pauseData.callFrames,
+                callFrames,
                 timestamp: Date.now()
               });
               const filename = bp.file.split('/').pop();
@@ -601,30 +689,32 @@ export class ProcessManager {
         this.emit('debuggerPaused', data);
       });
 
-      this.debugger.on('resumed', () => {
+      this.debugAdapter.on('resumed', () => {
         this._log('debug', 'Debugger resumed');
         this.emit('debuggerResumed', {});
       });
 
-      this.debugger.on('disconnected', () => {
+      this.debugAdapter.on('disconnected', () => {
         this._log('debug', 'Debugger disconnected');
         this.debuggerReady = false;
         this.emit('debuggerDisconnected', {});
       });
 
-      await this.debugger.connect(wsUrl);
-      await this.debugger.enable();
+      // Connect to the debugger
+      await this.debugAdapter.connect(options);
+      await this.debugAdapter.initialize();
 
       this.debuggerReady = true;
-      this._log('system', `[debug] V8 Inspector connected: ${wsUrl}`);
-      this.emit('debuggerReady', { url: wsUrl });
+      this.debugConnectionInfo = options.wsUrl || `${options.host || 'localhost'}:${options.port}`;
+      this._log('system', `[debug] ${this.currentRuntime.displayName} debugger connected: ${this.debugConnectionInfo}`);
+      this.emit('debuggerReady', { url: this.debugConnectionInfo });
 
       // Re-apply persisted breakpoints from previous session
       if (this.persistedBreakpoints && this.persistedBreakpoints.length > 0) {
         this._log('debug', `Restoring ${this.persistedBreakpoints.length} breakpoint(s)`);
         for (const bp of this.persistedBreakpoints) {
           try {
-            const result = await this.debugger.setBreakpoint(bp.file, bp.line, bp.condition || undefined);
+            const result = await this.debugAdapter.setBreakpoint(bp.file, bp.line, bp.condition || undefined);
             // Update the ID since new session gives new IDs
             bp.id = result.breakpointId;
             this._log('debug', `Restored breakpoint: ${bp.file}:${bp.line}`);
@@ -634,14 +724,13 @@ export class ProcessManager {
         }
       }
 
-      // Start the app - runIfWaitingForDebugger will trigger a "Break on start" pause
-      // which the paused event handler above will auto-resume from
-      this._log('debug', 'Starting app (runIfWaitingForDebugger)');
-      await this.debugger.runIfWaitingForDebugger();
+      // Start the app (V8: runIfWaitingForDebugger, DAP: configurationDone)
+      this._log('debug', 'Launching debuggee');
+      await this.debugAdapter.launch();
 
     } catch (err) {
       this._log('error', `Failed to connect debugger: ${(err as Error).message}`);
-      this.debugger = null;
+      this.debugAdapter = null;
     }
   }
 
@@ -651,12 +740,12 @@ export class ProcessManager {
    * Set a breakpoint
    */
   async debugSetBreakpoint(file: string, line: number, condition?: string): Promise<{ breakpointId: string }> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
     // Resolve to absolute path for consistency
     const absFile = resolve(file);
-    const result = await this.debugger.setBreakpoint(absFile, line, condition);
+    const result = await this.debugAdapter.setBreakpoint(absFile, line, condition);
     this._log('debug', `Breakpoint set: ${absFile}:${line}${condition ? ` (${condition})` : ''}`);
 
     // Persist for restarts (avoid duplicates)
@@ -671,7 +760,6 @@ export class ProcessManager {
         prompt: '',
         promptEnabled: false,
         hitCount: 0,
-        locations: result.locations
       });
     }
 
@@ -682,10 +770,10 @@ export class ProcessManager {
    * Remove a breakpoint
    */
   async debugRemoveBreakpoint(breakpointId: string): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.removeBreakpoint(breakpointId);
+    await this.debugAdapter.removeBreakpoint(breakpointId);
     this._log('debug', `Breakpoint removed: ${breakpointId}`);
 
     // Remove from persisted list
@@ -696,11 +784,11 @@ export class ProcessManager {
    * List all breakpoints
    */
   debugListBreakpoints(): (BreakpointInfo & { prompt?: string; promptEnabled?: boolean; enabled?: boolean; hitCount?: number })[] {
-    if (!this.debugger) {
+    if (!this.debugAdapter) {
       return [];
     }
     // Merge debugger breakpoints with persisted data (prompt, etc.)
-    const debuggerBps = this.debugger.listBreakpoints();
+    const debuggerBps = this.debugAdapter.listBreakpoints();
     return debuggerBps.map(bp => {
       const persisted = this.persistedBreakpoints.find(p => p.id === bp.id);
       return {
@@ -750,94 +838,115 @@ export class ProcessManager {
    * Resume debugger execution
    */
   async debugResume(): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.resume();
+    await this.debugAdapter.resume();
   }
 
   /**
    * Pause debugger execution
    */
   async debugPause(): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.pause();
+    await this.debugAdapter.pause();
   }
 
   /**
    * Step over current statement
    */
   async debugStepOver(): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.stepOver();
+    await this.debugAdapter.stepOver();
   }
 
   /**
    * Step into function call
    */
   async debugStepInto(): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.stepInto();
+    await this.debugAdapter.stepInto();
   }
 
   /**
    * Step out of current function
    */
   async debugStepOut(): Promise<void> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    await this.debugger.stepOut();
+    await this.debugAdapter.stepOut();
   }
 
   /**
    * Evaluate expression in debugger
    */
   async debugEvaluate(expression: string, callFrameId: string | null = null): Promise<unknown> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    return await this.debugger.evaluate(expression, callFrameId);
+    const result = await this.debugAdapter.evaluate(expression, callFrameId || undefined);
+    return result;
   }
 
   /**
    * Get current call stack
    */
-  debugGetCallStack(): CallFrame[] | null {
-    if (!this.debugger) {
+  debugGetCallStack(): StackFrame[] | null {
+    if (!this.debugAdapter || !this.debugAdapter.isPaused()) {
       return null;
     }
-    return this.debugger.getCallStack();
+    // Return cached call stack or empty
+    // Note: The new adapter is async, so we cache the call stack on pause events
+    return null; // Will be populated via events
+  }
+
+  /**
+   * Get current call stack (async version)
+   */
+  async debugGetCallStackAsync(): Promise<StackFrame[]> {
+    if (!this.debugAdapter || !this.debuggerReady) {
+      return [];
+    }
+    return await this.debugAdapter.getCallStack();
   }
 
   /**
    * Get scope variables
    */
   async debugGetScopeVariables(callFrameId: string, scopeType = 'local'): Promise<unknown> {
-    if (!this.debugger || !this.debuggerReady) {
+    if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
     }
-    return await this.debugger.getScopeVariables(callFrameId, scopeType);
+    // Get scopes for the frame
+    const scopes = await this.debugAdapter.getScopes(callFrameId);
+    // Find the requested scope type
+    const scope = scopes.find(s => s.type === scopeType) || scopes[0];
+    if (!scope) {
+      return [];
+    }
+    // Get variables for that scope
+    return await this.debugAdapter.getVariables(scope.variablesReference);
   }
 
   /**
    * Check if debugger is paused
    */
   isDebuggerPaused(): boolean {
-    return this.debugger?.isPaused() || false;
+    return this.debugAdapter?.isPaused() || false;
   }
 
   /**
    * Check if debugger is connected
    */
   isDebuggerConnected(): boolean {
-    return this.debugger?.isConnected() || false;
+    return this.debugAdapter?.isConnected() || false;
   }
 
   /**
@@ -848,15 +957,24 @@ export class ProcessManager {
     paused: boolean;
     inspectorUrl: string | null;
     breakpoints: BreakpointInfo[];
-    callStack: CallFrame[] | null;
+    callStack: StackFrame[] | null;
+    runtime: string | null;
   } {
     return {
       connected: this.isDebuggerConnected(),
       paused: this.isDebuggerPaused(),
-      inspectorUrl: this.inspectorUrl,
+      inspectorUrl: this.debugConnectionInfo,
       breakpoints: this.debugListBreakpoints(),
-      callStack: this.debugGetCallStack()
+      callStack: this.debugGetCallStack(),
+      runtime: this.currentRuntime?.name || null
     };
+  }
+
+  /**
+   * Get the current runtime info
+   */
+  getCurrentRuntime(): LanguageRuntime | null {
+    return this.currentRuntime;
   }
 
   /**
@@ -927,7 +1045,7 @@ export class ProcessManager {
   /**
    * Get process state
    */
-  getState(): ProcessState {
+  getState(): ProcessState & { runtime?: string } {
     return {
       isRunning: this._isRunning,
       pid: this.child?.pid || null,
@@ -945,7 +1063,8 @@ export class ProcessManager {
       debug: this.debug,
       debuggerConnected: this.isDebuggerConnected(),
       debuggerPaused: this.isDebuggerPaused(),
-      inspectorUrl: this.inspectorUrl
+      inspectorUrl: this.debugConnectionInfo,
+      runtime: this.currentRuntime?.displayName
     };
   }
 
@@ -1013,9 +1132,9 @@ export class ProcessManager {
    * Clean up resources
    */
   destroy(): void {
-    if (this.debugger) {
-      this.debugger.disconnect();
-      this.debugger = null;
+    if (this.debugAdapter) {
+      this.debugAdapter.disconnect();
+      this.debugAdapter = null;
     }
     if (this.outputSettleTimeout) {
       clearTimeout(this.outputSettleTimeout);
