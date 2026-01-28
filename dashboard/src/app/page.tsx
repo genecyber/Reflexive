@@ -126,30 +126,17 @@ export default function Dashboard() {
   const [editingBreakpoint, setEditingBreakpoint] = useState<Breakpoint | null>(null);
   const [isShutdown, setIsShutdown] = useState(false);
 
-  // Track previous breakpoints to detect new ones
+  // Track previous breakpoints (used for detecting changes, but no auto-modal)
   const prevBreakpointsRef = useRef<Breakpoint[]>([]);
 
-  // Detect new breakpoints and open prompt modal automatically
+  // Keep track of breakpoints without auto-opening modal
   useEffect(() => {
     if (!breakpoints || breakpoints.length === 0) {
       prevBreakpointsRef.current = [];
       return;
     }
-
-    const prevIds = new Set(prevBreakpointsRef.current.map(bp => bp.id));
-    const newBreakpoints = breakpoints.filter(bp => !prevIds.has(bp.id));
-
-    // If there's a new breakpoint without a prompt, open the modal
-    if (newBreakpoints.length > 0 && !bpModalOpen) {
-      const bpNeedingPrompt = newBreakpoints.find(bp => !bp.prompt);
-      if (bpNeedingPrompt) {
-        setEditingBreakpoint(bpNeedingPrompt);
-        setBpModalOpen(true);
-      }
-    }
-
     prevBreakpointsRef.current = breakpoints;
-  }, [breakpoints, bpModalOpen]);
+  }, [breakpoints]);
 
   // Panel width state for resizing
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
