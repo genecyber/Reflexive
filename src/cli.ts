@@ -24,6 +24,7 @@ import { createCliTools } from './mcp/cli-tools.js';
 import { createSandboxTools, getSandboxAllowedTools } from './mcp/sandbox-tools.js';
 import { createKnowledgeTools } from './mcp/knowledge-tools.js';
 import { parseJsonBody } from './core/http-server.js';
+import { getRuntimeForFile } from './runtimes/index.js';
 import { z } from 'zod';
 import type { Capabilities } from './types/index.js';
 import type { AnyToolDefinition } from './mcp/tools.js';
@@ -358,7 +359,7 @@ OPTIONS:
       --no-webui          Disable web dashboard (only applies to --mcp mode)
       --demo <name>       Run a built-in demo (basic, queue, inject, eval)
       --eval              Enable runtime code evaluation (includes deep instrumentation)
-  -d, --debug             Enable V8 Inspector debugging (breakpoints, stepping, scope inspection)
+  -d, --debug             Enable debugging (V8 Inspector for Node.js, DAP for Python/Go/.NET/Rust)
       --inspect           Enable eval + debug (the "poke around" mode)
   -c, --capabilities      Enable capabilities (comma-separated)
       --write             Enable file writing
@@ -378,7 +379,7 @@ CAPABILITIES:
   shellAccess    Run shell commands
   restart        Restart the process (default: on)
   eval           Runtime code evaluation with deep instrumentation
-  debug          V8 Inspector debugging
+  debug          Multi-language debugging (Node.js, Python, Go, .NET, Rust)
 
 MCP SERVER MODE:
   Run reflexive as an MCP server that external AI agents can connect to:
@@ -510,10 +511,12 @@ function buildSystemPrompt(processManager: ProcessManager, options: CliOptions):
 
   if (options.debug) {
     parts.push('');
-    parts.push('DEBUG MODE: V8 Inspector debugging is enabled.');
+    parts.push('DEBUG MODE: Multi-language debugging is enabled.');
+    parts.push('Supported: Node.js (V8 Inspector), Python (debugpy), Go (Delve), .NET (netcoredbg), Rust (CodeLLDB).');
     parts.push('You can set real breakpoints, step through code, and inspect variables.');
     parts.push('Use debug_set_breakpoint to add breakpoints at specific lines.');
     parts.push('When paused, use debug_get_call_stack and debug_get_scope_variables to inspect state.');
+    parts.push('You can also add a "prompt" to breakpoints that auto-triggers when hit.');
   }
 
   parts.push('');
@@ -1643,13 +1646,19 @@ async function main(): Promise<void> {
   const { port } = await startCliDashboard(processManager, options);
   const url = `http://${options.host}:${port}`;
 
+  // Detect runtime for debug info
+  const runtime = getRuntimeForFile(options.entry);
+  const debuggerName = runtime?.displayName
+    ? `${runtime.displayName} (${runtime.protocol === 'dap' ? 'DAP' : 'V8 Inspector'})`
+    : 'V8 Inspector';
+
   console.log(`
 Reflexive CLI
 
   Dashboard: ${url}
   Entry:     ${resolve(options.entry)}
   Interactive: ${options.interactive ? 'enabled (stdin proxied)' : 'disabled'}
-  Debug:     ${options.debug ? 'enabled (V8 Inspector)' : 'disabled'}
+  Debug:     ${options.debug ? `enabled (${debuggerName})` : 'disabled'}
 
   Capabilities:
     Read files:    yes

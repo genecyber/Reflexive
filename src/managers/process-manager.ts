@@ -311,6 +311,12 @@ export class ProcessManager {
         Object.assign(env, this.currentRuntime.buildEnv(this.debugPort));
       }
 
+      // Set CLI mode environment variables for library mode integration (Python SDK, etc.)
+      if (this.options.cliPort) {
+        env.REFLEXIVE_CLI_MODE = 'true';
+        env.REFLEXIVE_CLI_PORT = String(this.options.cliPort);
+      }
+
       // Disable injection for non-Node runtimes
       if (this.inject) {
         this._log('system', `[warn] Injection not supported for ${runtimeName}, disabling`);

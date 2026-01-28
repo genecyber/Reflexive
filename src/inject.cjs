@@ -155,7 +155,7 @@ function setupPerfHooks() {
 
   // Event loop utilization (periodic)
   if (perf.monitorEventLoopDelay) {
-    const h = perf.monitorEventLoopDelay({ resolution: 20 });
+    const h = perf.monitorEventLoopDelay({ resolution: 10 }); // 10ms resolution (default)
     h.enable();
 
     setInterval(() => {

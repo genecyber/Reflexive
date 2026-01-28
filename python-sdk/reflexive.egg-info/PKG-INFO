@@ -1,0 +1,232 @@
+Metadata-Version: 2.4
+Name: reflexive
+Version: 0.1.0
+Summary: AI-powered introspection for Python applications
+Home-page: https://github.com/anthropics/reflexive
+Author: Reflexive Team
+License: MIT
+Project-URL: Homepage, https://github.com/anthropics/reflexive
+Project-URL: Documentation, https://github.com/anthropics/reflexive/tree/main/python-sdk
+Project-URL: Repository, https://github.com/anthropics/reflexive
+Keywords: ai,introspection,debugging,observability,claude
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: psutil>=5.9.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21; extra == "dev"
+Requires-Dist: black>=23.0; extra == "dev"
+Requires-Dist: mypy>=1.0; extra == "dev"
+Dynamic: home-page
+Dynamic: requires-python
+
+# Reflexive Python SDK
+
+AI-powered introspection for Python applications. Build "hybrid" AI-native apps where your code can chat with Claude inline.
+
+## Installation
+
+```bash
+pip install reflexive
+```
+
+## Quick Start
+
+### Minimal Usage (Programmatic Chat)
+
+```python
+import reflexive
+
+# Create Reflexive instance (no web UI)
+r = reflexive.make_reflexive()
+
+# Track custom state
+r.set_state('users.active', 42)
+r.set_state('requests.count', 1337)
+
+# Chat with AI about your app
+response = r.chat('How many active users do we have?')
+print(response)  # "You currently have 42 active users."
+```
+
+### With Web Dashboard
+
+```python
+import reflexive
+import time
+
+# Enable web UI
+r = reflexive.make_reflexive({
+    'web_ui': True,
+    'port': 3099,
+    'title': 'My Python App'
+})
+
+print("Dashboard available at http://localhost:3099/reflexive")
+
+# Your application code
+for i in range(100):
+    r.set_state('iteration', i)
+    r.log('info', f'Processing iteration {i}')
+    time.sleep(1)
+```
+
+## Running with Reflexive CLI
+
+When you run your Python app with the Reflexive CLI, `make_reflexive()` automatically connects to the parent CLI:
+
+```bash
+# Install Reflexive CLI (Node.js)
+npm install -g reflexive
+
+# Run your Python app with full AI capabilities
+reflexive --debug app.py
+```
+
+Your Python code stays the same:
+
+```python
+import reflexive
+
+r = reflexive.make_reflexive()
+
+# This .chat() call works whether run standalone OR via CLI
+response = r.chat('Analyze my application performance')
+```
+
+## API Reference
+
+### `make_reflexive(options=None)`
+
+Create a Reflexive instance.
+
+**Options:**
+- `web_ui` (bool): Enable web dashboard (default: False)
+- `port` (int): Dashboard port when web_ui enabled (default: 3099)
+- `title` (str): Dashboard title (default: 'Reflexive')
+- `system_prompt` (str): Additional system prompt for AI
+
+**Returns:** `ReflexiveInstance`
+
+### `ReflexiveInstance`
+
+#### Methods
+
+- `chat(message: str) -> str`: Send message to AI, get response
+- `set_state(key: str, value: Any) -> None`: Set custom state
+- `get_state(key: str = None) -> Any`: Get custom state
+- `log(type: str, message: str) -> None`: Add log entry
+
+#### Properties
+
+- `app_state`: `AppState` instance for direct access
+
+## Examples
+
+### AI-Powered Web Server
+
+```python
+import reflexive
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+r = reflexive.make_reflexive()
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith('/story/'):
+            topic = self.path[7:]
+            # Use AI inline!
+            story = r.chat(f'Write a short story about: {topic}')
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(story.encode('utf-8'))
+
+server = HTTPServer(('', 8080), Handler)
+print('Story server running on http://localhost:8080')
+server.serve_forever()
+```
+
+### Background Task Monitor
+
+```python
+import reflexive
+import time
+import random
+
+r = reflexive.make_reflexive({'web_ui': True})
+
+tasks_processed = 0
+errors = 0
+
+while True:
+    # Simulate task processing
+    success = random.random() > 0.1
+
+    if success:
+        tasks_processed += 1
+        r.set_state('tasks.processed', tasks_processed)
+        r.log('info', f'Task {tasks_processed} completed')
+    else:
+        errors += 1
+        r.set_state('tasks.errors', errors)
+        r.log('error', 'Task failed')
+
+    # Ask AI for insights periodically
+    if tasks_processed % 10 == 0:
+        analysis = r.chat('Summarize task processing performance')
+        print(f'\n--- AI Analysis ---\n{analysis}\n')
+
+    time.sleep(1)
+```
+
+## How It Works
+
+### Standalone Mode
+When you call `make_reflexive()`, it:
+1. Creates an `AppState` to track logs and custom state
+2. Intercepts Python logging and stdout/stderr
+3. Optionally starts an HTTP server for the web UI
+
+### CLI Child Mode
+When running under `reflexive app.py`, it:
+1. Detects environment variables (`REFLEXIVE_CLI_MODE`, `REFLEXIVE_CLI_PORT`)
+2. Connects to parent CLI's HTTP server
+3. Proxies `chat()` calls to CLI
+4. Syncs state to CLI dashboard
+
+This means your code works identically in both modes!
+
+## Comparison with Node.js
+
+| Feature | Python SDK | Node.js SDK |
+|---------|-----------|-------------|
+| `make_reflexive()` | ✅ | ✅ |
+| `.chat()` | ✅ | ✅ |
+| `.set_state()` | ✅ | ✅ |
+| `.get_state()` | ✅ | ✅ |
+| `.log()` | ✅ | ✅ |
+| Web UI | ✅ | ✅ |
+| CLI integration | ✅ | ✅ |
+| Custom tools | 🚧 Coming soon | ✅ |
+| Debugger | Via `--debug` | Via `--debug` |
+
+## Requirements
+
+- Python 3.8+
+- `psutil` for memory stats
+
+## License
+
+MIT

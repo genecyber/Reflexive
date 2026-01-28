@@ -55,6 +55,8 @@ const TOPIC_FILES: Record<string, string> = {
   'architecture': 'developer-guide.md',
   'deployment': 'deployment.md',
   'deploy': 'deployment.md',
+  'python': 'python-sdk.md',
+  'python-sdk': 'python-sdk.md',
 };
 
 // Get list of available topics
@@ -69,7 +71,7 @@ function getAvailableTopics(): string[] {
     }
   }
 
-  return ['overview', 'getting-started', 'user-guide', 'api-reference', 'developer-guide', 'deployment'];
+  return ['overview', 'getting-started', 'user-guide', 'api-reference', 'python-sdk', 'developer-guide', 'deployment'];
 }
 
 // Read documentation file
