@@ -96,6 +96,9 @@ interface Message {
   content: string;
   isWatchTrigger?: boolean;
   watchPattern?: string;
+  isBreakpointPrompt?: boolean;
+  breakpointInfo?: { file: string; line: number };
+  isAutoTrigger?: boolean;
 }
 
 interface ChatPanelProps {
@@ -104,10 +107,12 @@ interface ChatPanelProps {
   isRunning: boolean;
   showControls: boolean;
   interactive: boolean;
+  autoHandleEnabled?: boolean;
   onSendMessage: (message: string) => void;
   onStopResponse: () => void;
   onClearMessages: () => void;
   onSendCliInput?: (input: string) => void;
+  onAutoHandleChange?: (enabled: boolean) => void;
 }
 
 export function ChatPanel({
@@ -116,15 +121,16 @@ export function ChatPanel({
   isRunning,
   showControls,
   interactive,
+  autoHandleEnabled = false,
   onSendMessage,
   onStopResponse,
   onClearMessages,
   onSendCliInput,
+  onAutoHandleChange,
 }: ChatPanelProps) {
   const [input, setInput] = useState('');
   const [cliInput, setCliInput] = useState('');
   const [inputMode, setInputMode] = useState<'agent' | 'cli'>('agent');
-  const [autoHandle, setAutoHandle] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -169,6 +175,10 @@ export function ChatPanel({
             <div className="message-meta">
               {msg.isWatchTrigger && msg.role === 'assistant'
                 ? `👁 watch triggered: ${msg.watchPattern?.slice(0, 30) || ''}`
+                : msg.isBreakpointPrompt && msg.role === 'assistant'
+                ? `🔴 breakpoint hit: ${msg.breakpointInfo?.file.split('/').pop() || ''}:${msg.breakpointInfo?.line || ''}`
+                : msg.isAutoTrigger
+                ? 'agent (auto)'
                 : msg.role}
             </div>
             {/* bubble - EXACT original backgrounds and margins */}
@@ -178,7 +188,11 @@ export function ChatPanel({
                 background: msg.role === 'user' ? '#1e3a5f' : '#1a1a24',
                 marginLeft: msg.role === 'user' ? '30px' : undefined,
                 marginRight: msg.role === 'assistant' ? '30px' : undefined,
-                borderLeft: msg.isWatchTrigger && msg.role === 'assistant' ? '3px solid #3b82f6' : undefined,
+                borderLeft: msg.isWatchTrigger && msg.role === 'assistant'
+                  ? '3px solid #3b82f6'
+                  : msg.isBreakpointPrompt && msg.role === 'assistant'
+                  ? '3px solid #ef4444'
+                  : undefined,
               }}
             >
               {msg.role === 'assistant' ? (
@@ -285,11 +299,11 @@ export function ChatPanel({
 
         {showControls && (
           <div className="flex items-center mt-2 pt-2 border-t border-zinc-800">
-            <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer hover:text-white">
+            <label className={`flex items-center gap-2 text-xs cursor-pointer hover:text-white ${autoHandleEnabled ? 'text-blue-400' : 'text-zinc-500'}`}>
               <input
                 type="checkbox"
-                checked={autoHandle}
-                onChange={(e) => setAutoHandle(e.target.checked)}
+                checked={autoHandleEnabled}
+                onChange={(e) => onAutoHandleChange?.(e.target.checked)}
                 className="w-4 h-4 accent-blue-500"
               />
               <span>Let agent continue after output</span>

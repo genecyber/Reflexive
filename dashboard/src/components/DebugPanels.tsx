@@ -20,6 +20,7 @@ interface DebugPanelsProps {
   onEditBreakpointPrompt: (breakpoint: Breakpoint) => void;
   onDeleteBreakpoint: (id: string) => void;
   onToggleBreakpoint: (id: string, enabled: boolean) => void;
+  onToggleBreakpointPrompt?: (id: string, promptEnabled: boolean) => void;
   onDebuggerResume: () => void;
   onDebuggerStepOver: () => void;
   onDebuggerStepInto: () => void;
@@ -49,6 +50,7 @@ export function DebugPanels({
   onEditBreakpointPrompt,
   onDeleteBreakpoint,
   onToggleBreakpoint,
+  onToggleBreakpointPrompt,
   onDebuggerResume,
   onDebuggerStepOver,
   onDebuggerStepInto,
@@ -287,7 +289,8 @@ export function DebugPanels({
                     <input
                       type="checkbox"
                       checked={bp.promptEnabled}
-                      onChange={(e) => onToggleBreakpoint(bp.id, bp.enabled)} // Should update promptEnabled
+                      onChange={(e) => onToggleBreakpointPrompt?.(bp.id, e.target.checked)}
+                      onClick={(e) => e.stopPropagation()}
                       className="w-3 h-3 accent-blue-500"
                       title="Enable prompt on hit"
                     />

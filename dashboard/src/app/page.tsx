@@ -133,6 +133,11 @@ export default function Dashboard() {
   // Right panel collapsed state
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
+  // Agent auto-continue state
+  const [autoHandleEnabled, setAutoHandleEnabled] = useState(false);
+  const lastAutoLogCountRef = useRef(-1);
+  const autoHandlingRef = useRef(false);
+
   // Process the aggregated watch queue when agent finishes
   const processWatchQueue = useCallback(() => {
     if (isProcessingQueueRef.current || isLoading) return;
@@ -238,6 +243,65 @@ User prompt: ${entry.prompt}`;
     lastCheckedLogIndexRef.current = logs.length;
   }, [logs.length, watches, isLoading, processWatchQueue]);
 
+  // Breakpoint prompt auto-triggering: monitor debuggerStatus for triggered prompts
+  useEffect(() => {
+    if (!debuggerStatus?.triggeredPrompts?.length || isLoading) return;
+
+    for (const triggered of debuggerStatus.triggeredPrompts) {
+      const bp = triggered.breakpoint;
+      if (!bp.prompt) continue;
+
+      const filename = bp.file.split('/').pop();
+      const stackInfo = triggered.callFrames?.length
+        ? `\n\nCall stack:\n${triggered.callFrames.slice(0, 5).map((f: { functionName: string; lineNumber: number }) =>
+            `  - ${f.functionName || '(anonymous)'} at line ${f.lineNumber}`
+          ).join('\n')}`
+        : '';
+
+      const contextMsg = `BREAKPOINT HIT: Debugger paused at ${filename}:${bp.line}${stackInfo}\n\nUser prompt: ${bp.prompt}`;
+      sendMessage(contextMsg, { isBreakpointPrompt: true, breakpointInfo: { file: bp.file, line: Number(bp.line) } });
+    }
+  }, [debuggerStatus?.triggeredPrompts, isLoading, sendMessage]);
+
+  // Agent auto-continue: monitor for new output and trigger agent when enabled
+  useEffect(() => {
+    if (!autoHandleEnabled || autoHandlingRef.current || isLoading) return;
+
+    // Initialize baseline on first check
+    if (lastAutoLogCountRef.current === -1) {
+      lastAutoLogCountRef.current = logs.length;
+      return;
+    }
+
+    // Check for new output
+    const hasNewOutput = logs.length > lastAutoLogCountRef.current;
+    const isWaiting = status?.waitingForInput ?? false;
+    const isInteractive = status?.interactive ?? false;
+
+    if (hasNewOutput) {
+      lastAutoLogCountRef.current = logs.length;
+
+      // In interactive mode, only trigger if waiting for input
+      // In non-interactive mode, trigger on new output
+      if (isWaiting || !isInteractive) {
+        autoHandlingRef.current = true;
+
+        const autoMessage = isWaiting
+          ? 'AUTO_CONTINUE: The CLI is waiting for input. Look at the recent output, understand what it is asking or expecting, and use the send_input tool to respond. Do not ask me - handle it directly.'
+          : 'AUTO_CONTINUE: New output has appeared. Review the recent logs and continue working on the current task. If you see errors, investigate and fix them. If a task completed successfully, report it and proceed with any next steps. Do not ask me - just continue working.';
+
+        sendMessage(autoMessage, { isAutoTrigger: true });
+      }
+    }
+  }, [autoHandleEnabled, logs.length, isLoading, status?.waitingForInput, status?.interactive, sendMessage]);
+
+  // Reset auto handling flag when loading finishes
+  useEffect(() => {
+    if (!isLoading && autoHandlingRef.current) {
+      autoHandlingRef.current = false;
+    }
+  }, [isLoading]);
+
   // Watch handlers
   const handleAddWatch = useCallback((message: string) => {
     setWatchMessage(message);
@@ -302,6 +366,10 @@ User prompt: ${entry.prompt}`;
     updateBreakpoint(id, { enabled });
   }, [updateBreakpoint]);
 
+  const handleToggleBreakpointPrompt = useCallback((id: string, promptEnabled: boolean) => {
+    updateBreakpoint(id, { promptEnabled });
+  }, [updateBreakpoint]);
+
   // Shutdown handler
   const handleShutdown = useCallback(async () => {
     setIsShutdown(true);
@@ -332,10 +400,12 @@ User prompt: ${entry.prompt}`;
             isRunning={status?.isRunning ?? false}
             showControls={status?.showControls ?? true}
             interactive={status?.interactive ?? false}
+            autoHandleEnabled={autoHandleEnabled}
             onSendMessage={sendMessage}
             onStopResponse={stopResponse}
             onClearMessages={clearMessages}
             onSendCliInput={sendCliInput}
+            onAutoHandleChange={setAutoHandleEnabled}
           />
 
           {/* Resize Handle - Vertical */}
@@ -422,6 +492,7 @@ User prompt: ${entry.prompt}`;
                   onEditBreakpointPrompt={handleEditBreakpointPrompt}
                   onDeleteBreakpoint={deleteBreakpoint}
                   onToggleBreakpoint={handleToggleBreakpoint}
+                  onToggleBreakpointPrompt={handleToggleBreakpointPrompt}
                   onDebuggerResume={debuggerResume}
                   onDebuggerStepOver={debuggerStepOver}
                   onDebuggerStepInto={debuggerStepInto}

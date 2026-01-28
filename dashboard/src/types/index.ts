@@ -26,6 +26,8 @@ export interface ProcessStatus {
   interactive?: boolean;
   eval?: boolean;
   debug?: boolean;
+  // For agent auto-continue
+  waitingForInput?: boolean;
 }
 
 export interface Capabilities {

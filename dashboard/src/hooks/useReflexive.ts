@@ -267,6 +267,9 @@ interface ChatMessage {
   content: string;
   isWatchTrigger?: boolean;
   watchPattern?: string;
+  isBreakpointPrompt?: boolean;
+  breakpointInfo?: { file: string; line: number };
+  isAutoTrigger?: boolean;
 }
 
 // Chat hook for streaming
@@ -275,13 +278,16 @@ export function useChat() {
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const sendMessage = useCallback(async (message: string, options?: { isWatchTrigger?: boolean; watchPattern?: string }) => {
+  const sendMessage = useCallback(async (message: string, options?: { isWatchTrigger?: boolean; watchPattern?: string; isBreakpointPrompt?: boolean; breakpointInfo?: { file: string; line: number }; isAutoTrigger?: boolean }) => {
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user' as const,
       content: message,
       isWatchTrigger: options?.isWatchTrigger,
       watchPattern: options?.watchPattern,
+      isBreakpointPrompt: options?.isBreakpointPrompt,
+      breakpointInfo: options?.breakpointInfo,
+      isAutoTrigger: options?.isAutoTrigger,
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -293,6 +299,9 @@ export function useChat() {
       content: '',
       isWatchTrigger: options?.isWatchTrigger,
       watchPattern: options?.watchPattern,
+      isBreakpointPrompt: options?.isBreakpointPrompt,
+      breakpointInfo: options?.breakpointInfo,
+      isAutoTrigger: options?.isAutoTrigger,
     };
     setMessages(prev => [...prev, assistantMessage]);
 
