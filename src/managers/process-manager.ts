@@ -18,7 +18,7 @@ import { resolve, dirname, extname } from 'path';
 import { fileURLToPath } from 'url';
 import type { DebugAdapter, BreakpointInfo, StackFrame, LanguageRuntime, DebugConnectionOptions } from '../types/debug.js';
 import { V8InspectorAdapter } from '../adapters/v8-inspector-adapter.js';
-import { runtimeRegistry, findAvailablePort } from '../runtimes/index.js';
+import { runtimeRegistry, findAvailablePort, validateRuntime } from '../runtimes/index.js';
 import type { LogEntry, ProcessState, EventHandler } from '../types/index.js';
 
 // Legacy re-export for backward compatibility
@@ -289,6 +289,16 @@ export class ProcessManager {
       // Other runtimes - use runtime configuration
       command = this.currentRuntime.command;
 
+      // Validate runtime setup before attempting to spawn with debug
+      if (this.debug) {
+        const validation = await validateRuntime(this.currentRuntime);
+        if (!validation.valid) {
+          this._log('stderr', `${this.currentRuntime.displayName} debugging not available: ${validation.message}`);
+          this._log('stderr', `Running without debugging. Install the debugger to enable debug features.`);
+          this.debug = false;
+        }
+      }
+
       if (this.debug) {
         args = this.currentRuntime.buildArgs(this.debugPort, this.entry, this.options.appArgs);
       } else {
@@ -398,6 +408,17 @@ export class ProcessManager {
         if (!message || !message.reflexive) return;
         this._handleInjectedMessage(message);
       });
+    }
+
+    // For DAP-based debuggers (non-Node), attempt connection after a short delay
+    // since they may not output a "ready" message like V8 Inspector does
+    if (this.debug && this.currentRuntime && this.currentRuntime.protocol === 'dap') {
+      setTimeout(() => {
+        if (this._isRunning && !this.debugConnectionInfo) {
+          this._log('system', `[debug] Attempting DAP connection to port ${this.debugPort}...`);
+          this._connectDebugger({ port: this.debugPort, host: '127.0.0.1' });
+        }
+      }, 1000); // Give debugpy a second to start listening
     }
   }
 

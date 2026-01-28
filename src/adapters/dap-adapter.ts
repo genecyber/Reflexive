@@ -45,6 +45,9 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
 
   // Store pending configuration for launch
   private launchConfig: Record<string, unknown> | null = null;
+  // Store connection info for attach request
+  private connectionHost: string = 'localhost';
+  private connectionPort: number = 0;
 
   /**
    * Connect to DAP server
@@ -57,6 +60,10 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
     if (!port) {
       throw new Error('DAPAdapter requires port in connection options');
     }
+
+    // Store for attach request
+    this.connectionHost = host;
+    this.connectionPort = port;
 
     this.client = new SocketDebugClient({
       port,
@@ -182,10 +189,20 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
 
   /**
    * Initialize the debug session
+   *
+   * DAP sequence: initialize → attach → (wait for initialized event) → configurationDone
    */
   async initialize(): Promise<void> {
     if (!this.client || this._initialized) return;
 
+    // Set up promise to wait for initialized event
+    const initializedPromise = new Promise<void>((resolve) => {
+      this.client!.onInitialized(() => {
+        resolve();
+      }, true); // 'true' = once
+    });
+
+    // Send initialize request
     await this.client.initialize({
       clientID: 'reflexive',
       clientName: 'Reflexive Debugger',
@@ -199,26 +216,34 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
       supportsProgressReporting: false,
     });
 
+    // Send attach request - for debugpy with --wait-for-client, this tells it we're connected
+    // debugpy expects a 'connect' object with host and port per VSCode's configuration spec
+    await this.client.attach({
+      connect: {
+        host: this.connectionHost,
+        port: this.connectionPort,
+      },
+    } as Record<string, unknown>);
+
+    // Wait for initialized event (with timeout)
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout waiting for initialized event')), 5000);
+    });
+
+    await Promise.race([initializedPromise, timeoutPromise]);
+
+    // Now send configurationDone to signal we're ready for execution to continue
+    await this.client.configurationDone({});
+
     this._initialized = true;
   }
 
   /**
-   * Launch or attach to the debuggee
+   * Launch or attach to the debuggee (no-op since initialization handles this)
    */
-  async launch(config?: Record<string, unknown>): Promise<void> {
-    if (!this.client) {
-      throw new Error('Not connected to DAP server');
-    }
-
-    // Store config for potential use
-    this.launchConfig = config || {};
-
-    // For most DAP servers, we just need to send configurationDone
-    // The actual launch/attach was done when starting the debugger process
-    // Some debuggers (like debugpy) are already attached when we connect
-
-    // Send configuration done to signal we're ready
-    await this.client.configurationDone({});
+  async launch(_config?: Record<string, unknown>): Promise<void> {
+    // Initialization already sent attach and configurationDone
+    // This method exists for interface compatibility
   }
 
   // ─────────────────────────────────────────────────────────────────
