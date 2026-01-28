@@ -308,14 +308,20 @@ export function DebugPanels({
               {debuggerStatus?.paused && debuggerStatus.callStack && debuggerStatus.callStack.length > 0 && (
                 <div className="border-t border-zinc-800 mt-1 pt-1">
                   <div className="px-3 py-1 text-[10px] text-zinc-500">Call Stack:</div>
-                  {debuggerStatus.callStack.slice(0, 5).map((frame, i) => (
-                    <div key={i} className="flex gap-1 px-3 py-0.5 text-[10px] font-mono">
-                      <span className="text-zinc-600">#{i}</span>
-                      <span className="text-zinc-400">
-                        {frame.functionName || '(anonymous)'} at {frame.url.split('/').pop()}:{frame.lineNumber}
-                      </span>
-                    </div>
-                  ))}
+                  {debuggerStatus.callStack.slice(0, 5).map((frame, i) => {
+                    const funcName = frame.name || frame.functionName || '(anonymous)';
+                    const filePath = frame.source?.path || frame.url || 'unknown';
+                    const fileName = filePath.split('/').pop() || filePath;
+                    const lineNum = frame.line ?? frame.lineNumber ?? '?';
+                    return (
+                      <div key={i} className="flex gap-1 px-3 py-0.5 text-[10px] font-mono">
+                        <span className="text-zinc-600">#{i}</span>
+                        <span className="text-zinc-400">
+                          {funcName} at {fileName}:{lineNum}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

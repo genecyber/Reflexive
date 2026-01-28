@@ -32,6 +32,79 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // ============================================================================
+// Helper: Convert Zod schema to JSON Schema for SDK MCP server
+// ============================================================================
+
+/**
+ * Convert a Zod schema to JSON Schema format for the Claude Agent SDK
+ * The SDK needs JSON Schema, not Zod objects
+ */
+function convertZodToJsonSchema(zodSchema: z.ZodTypeAny): Record<string, unknown> {
+  // Handle ZodObject specifically
+  if (zodSchema instanceof z.ZodObject) {
+    const shape = zodSchema.shape;
+    const properties: Record<string, unknown> = {};
+    const required: string[] = [];
+
+    for (const [key, value] of Object.entries(shape)) {
+      const fieldSchema = value as z.ZodTypeAny;
+      properties[key] = convertZodFieldToJsonSchema(fieldSchema);
+
+      // Check if field is required (not optional)
+      if (!(fieldSchema instanceof z.ZodOptional)) {
+        required.push(key);
+      }
+    }
+
+    return {
+      type: 'object',
+      properties,
+      required: required.length > 0 ? required : undefined
+    };
+  }
+
+  // Fallback for non-object schemas
+  return { type: 'object', properties: {} };
+}
+
+/**
+ * Convert a single Zod field to JSON Schema
+ */
+function convertZodFieldToJsonSchema(field: z.ZodTypeAny): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  // Handle optional wrapper
+  let innerField = field;
+  if (field instanceof z.ZodOptional) {
+    innerField = field._def.innerType;
+  }
+
+  // Determine type
+  if (innerField instanceof z.ZodString) {
+    result.type = 'string';
+  } else if (innerField instanceof z.ZodNumber) {
+    result.type = 'number';
+  } else if (innerField instanceof z.ZodBoolean) {
+    result.type = 'boolean';
+  } else if (innerField instanceof z.ZodArray) {
+    result.type = 'array';
+    result.items = convertZodFieldToJsonSchema(innerField._def.type);
+  } else if (innerField instanceof z.ZodEnum) {
+    result.type = 'string';
+    result.enum = innerField._def.values;
+  } else {
+    result.type = 'string'; // fallback
+  }
+
+  // Add description if available
+  if (field.description) {
+    result.description = field.description;
+  }
+
+  return result;
+}
+
+// ============================================================================
 // Static file serving for Next.js dashboard
 // ============================================================================
 
@@ -532,9 +605,15 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
   const knowledgeTools = createKnowledgeTools();
   const allTools = [...cliTools, ...knowledgeTools];
 
+  // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
+  const sdkTools = allTools.map(tool => ({
+    ...tool,
+    inputSchema: tool.inputSchema instanceof z.ZodObject ? tool.inputSchema.shape : {}
+  }));
+
   const mcpServer = createSdkMcpServer({
     name: 'reflexive-cli',
-    tools: allTools
+    tools: sdkTools
   });
 
   // Store conversation session ID for continuity
@@ -957,6 +1036,29 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
         return;
       }
 
+      // Clear triggered breakpoint prompts after frontend processes them
+      if (pathname === '/debugger-clear-prompts' && req.method === 'POST') {
+        if (!options.debug) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Debug mode not enabled' }));
+          return;
+        }
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        try {
+          const { timestamps } = JSON.parse(body);
+          if (timestamps && Array.isArray(timestamps)) {
+            processManager.clearTriggeredBreakpointPrompts(timestamps);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: (err as Error).message }));
+        }
+        return;
+      }
+
       if (pathname === '/debugger-resume' && req.method === 'POST') {
         if (!options.debug) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1167,9 +1269,15 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
   const knowledgeTools = createKnowledgeTools();
   const allTools = [...sandboxTools, ...knowledgeTools];
 
+  // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
+  const sdkTools = allTools.map(tool => ({
+    ...tool,
+    inputSchema: tool.inputSchema instanceof z.ZodObject ? tool.inputSchema.shape : {}
+  }));
+
   const mcpServer = createSdkMcpServer({
     name: 'reflexive-sandbox',
-    tools: allTools
+    tools: sdkTools
   });
 
   // Store conversation session ID for continuity
@@ -1818,9 +1926,14 @@ async function runMcpMode(options: CliOptions): Promise<void> {
   const shellTools = createShellTool(options.capabilities);
 
   // Create SDK MCP server for the embedded agent (used by chat tool)
+  // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
+  const embeddedTools = [...cliTools, ...knowledgeTools].map(tool => ({
+    ...tool,
+    inputSchema: tool.inputSchema instanceof z.ZodObject ? tool.inputSchema.shape : {}
+  }));
   const embeddedMcpServer = createSdkMcpServer({
     name: 'reflexive-embedded',
-    tools: [...cliTools, ...knowledgeTools]
+    tools: embeddedTools
   });
 
   // Chat tool allows external agents to talk to the embedded Reflexive agent
@@ -1925,6 +2038,10 @@ async function runMcpMode(options: CliOptions): Promise<void> {
           const toolArgs = request.params?.arguments || {};
           const tool = allTools.find(t => t.name === toolName);
 
+          // Debug logging for MCP tool calls
+          console.error(`[MCP] Tool call: ${toolName}`);
+          console.error(`[MCP] Raw args: ${JSON.stringify(toolArgs)}`);
+
           if (!tool) {
             response = {
               jsonrpc: '2.0',
@@ -1933,7 +2050,9 @@ async function runMcpMode(options: CliOptions): Promise<void> {
             };
           } else {
             try {
-              const result = await tool.handler(toolArgs);
+              // Parse and validate input using the tool's Zod schema
+              const parsedArgs = tool.inputSchema.parse(toolArgs);
+              const result = await tool.handler(parsedArgs);
               response = {
                 jsonrpc: '2.0',
                 id: request.id,

@@ -486,7 +486,7 @@ describe('CLI Tools', () => {
       const pm = createMockProcessManager({
         isDebuggerPaused: vi.fn().mockReturnValue(true),
         debugGetCallStack: vi.fn().mockReturnValue([
-          { callFrameId: 'cf-1', functionName: 'main', url: '/app.js', lineNumber: 10, columnNumber: 0, scopeChain: [] }
+          { id: 'cf-1', name: 'main', source: { path: '/app.js', name: 'app.js' }, line: 10, column: 0 }
         ])
       });
       const tools = createCliTools({

@@ -126,17 +126,37 @@ export default function Dashboard() {
   const [editingBreakpoint, setEditingBreakpoint] = useState<Breakpoint | null>(null);
   const [isShutdown, setIsShutdown] = useState(false);
 
+  // Track previous breakpoints to detect new ones
+  const prevBreakpointsRef = useRef<Breakpoint[]>([]);
+
+  // Detect new breakpoints and open prompt modal automatically
+  useEffect(() => {
+    if (!breakpoints || breakpoints.length === 0) {
+      prevBreakpointsRef.current = [];
+      return;
+    }
+
+    const prevIds = new Set(prevBreakpointsRef.current.map(bp => bp.id));
+    const newBreakpoints = breakpoints.filter(bp => !prevIds.has(bp.id));
+
+    // If there's a new breakpoint without a prompt, open the modal
+    if (newBreakpoints.length > 0 && !bpModalOpen) {
+      const bpNeedingPrompt = newBreakpoints.find(bp => !bp.prompt);
+      if (bpNeedingPrompt) {
+        setEditingBreakpoint(bpNeedingPrompt);
+        setBpModalOpen(true);
+      }
+    }
+
+    prevBreakpointsRef.current = breakpoints;
+  }, [breakpoints, bpModalOpen]);
+
   // Panel width state for resizing
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [debugPanelsHeight, setDebugPanelsHeight] = useState(180);
 
   // Right panel collapsed state
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
-
-  // Agent auto-continue state
-  const [autoHandleEnabled, setAutoHandleEnabled] = useState(false);
-  const lastAutoLogCountRef = useRef(-1);
-  const autoHandlingRef = useRef(false);
 
   // Process the aggregated watch queue when agent finishes
   const processWatchQueue = useCallback(() => {
@@ -243,64 +263,58 @@ User prompt: ${entry.prompt}`;
     lastCheckedLogIndexRef.current = logs.length;
   }, [logs.length, watches, isLoading, processWatchQueue]);
 
-  // Breakpoint prompt auto-triggering: monitor debuggerStatus for triggered prompts
+  // Breakpoint prompt auto-triggering: when a breakpoint with a prompt is hit, send to agent
   useEffect(() => {
-    if (!debuggerStatus?.triggeredPrompts?.length || isLoading) return;
+    // Check if there are triggered prompts from the backend
+    if (!debuggerStatus?.triggeredPrompts || debuggerStatus.triggeredPrompts.length === 0) return;
 
-    for (const triggered of debuggerStatus.triggeredPrompts) {
-      const bp = triggered.breakpoint;
-      if (!bp.prompt) continue;
+    // Don't process if already loading
+    if (isLoading) return;
 
-      const filename = bp.file.split('/').pop();
-      const stackInfo = triggered.callFrames?.length
-        ? `\n\nCall stack:\n${triggered.callFrames.slice(0, 5).map((f: { functionName: string; lineNumber: number }) =>
-            `  - ${f.functionName || '(anonymous)'} at line ${f.lineNumber}`
-          ).join('\n')}`
-        : '';
+    // Process the first triggered prompt
+    const triggered = debuggerStatus.triggeredPrompts[0];
+    const bp = triggered.breakpoint;
 
-      const contextMsg = `BREAKPOINT HIT: Debugger paused at ${filename}:${bp.line}${stackInfo}\n\nUser prompt: ${bp.prompt}`;
-      sendMessage(contextMsg, { isBreakpointPrompt: true, breakpointInfo: { file: bp.file, line: Number(bp.line) } });
-    }
+    // Only send if the breakpoint has a prompt and it's enabled
+    if (!bp.prompt || bp.promptEnabled === false) return;
+
+    // Build context message for the agent
+    const filename = bp.file.split('/').pop() || bp.file;
+    const callStackStr = triggered.callFrames
+      ?.slice(0, 5)
+      .map((f, i) => {
+        const funcName = f.name || f.functionName || '(anonymous)';
+        const filePath = f.source?.path || f.url || 'unknown';
+        const fileName = filePath.split('/').pop() || filePath;
+        const lineNum = f.line ?? f.lineNumber ?? '?';
+        return `  #${i} ${funcName} at ${fileName}:${lineNum}`;
+      })
+      .join('\n') || 'Not available';
+
+    const contextMsg = `[BREAKPOINT HIT: ${filename}:${bp.line}]
+
+The debugger has paused at a breakpoint you set. Here's the context:
+
+File: ${bp.file}
+Line: ${bp.line}
+${bp.condition ? `Condition: ${bp.condition}` : ''}
+
+Call Stack:
+${callStackStr}
+
+User prompt: ${bp.prompt}`;
+
+    // Send message to agent
+    sendMessage(contextMsg, { isWatchTrigger: false, watchPattern: undefined });
+
+    // Clear the processed prompt from backend
+    const timestamps = debuggerStatus.triggeredPrompts.map(p => p.timestamp);
+    fetch('/debugger-clear-prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timestamps }),
+    }).catch(() => { /* ignore errors */ });
   }, [debuggerStatus?.triggeredPrompts, isLoading, sendMessage]);
-
-  // Agent auto-continue: monitor for new output and trigger agent when enabled
-  useEffect(() => {
-    if (!autoHandleEnabled || autoHandlingRef.current || isLoading) return;
-
-    // Initialize baseline on first check
-    if (lastAutoLogCountRef.current === -1) {
-      lastAutoLogCountRef.current = logs.length;
-      return;
-    }
-
-    // Check for new output
-    const hasNewOutput = logs.length > lastAutoLogCountRef.current;
-    const isWaiting = status?.waitingForInput ?? false;
-    const isInteractive = status?.interactive ?? false;
-
-    if (hasNewOutput) {
-      lastAutoLogCountRef.current = logs.length;
-
-      // In interactive mode, only trigger if waiting for input
-      // In non-interactive mode, trigger on new output
-      if (isWaiting || !isInteractive) {
-        autoHandlingRef.current = true;
-
-        const autoMessage = isWaiting
-          ? 'AUTO_CONTINUE: The CLI is waiting for input. Look at the recent output, understand what it is asking or expecting, and use the send_input tool to respond. Do not ask me - handle it directly.'
-          : 'AUTO_CONTINUE: New output has appeared. Review the recent logs and continue working on the current task. If you see errors, investigate and fix them. If a task completed successfully, report it and proceed with any next steps. Do not ask me - just continue working.';
-
-        sendMessage(autoMessage, { isAutoTrigger: true });
-      }
-    }
-  }, [autoHandleEnabled, logs.length, isLoading, status?.waitingForInput, status?.interactive, sendMessage]);
-
-  // Reset auto handling flag when loading finishes
-  useEffect(() => {
-    if (!isLoading && autoHandlingRef.current) {
-      autoHandlingRef.current = false;
-    }
-  }, [isLoading]);
 
   // Watch handlers
   const handleAddWatch = useCallback((message: string) => {
@@ -366,10 +380,6 @@ User prompt: ${entry.prompt}`;
     updateBreakpoint(id, { enabled });
   }, [updateBreakpoint]);
 
-  const handleToggleBreakpointPrompt = useCallback((id: string, promptEnabled: boolean) => {
-    updateBreakpoint(id, { promptEnabled });
-  }, [updateBreakpoint]);
-
   // Shutdown handler
   const handleShutdown = useCallback(async () => {
     setIsShutdown(true);
@@ -400,12 +410,10 @@ User prompt: ${entry.prompt}`;
             isRunning={status?.isRunning ?? false}
             showControls={status?.showControls ?? true}
             interactive={status?.interactive ?? false}
-            autoHandleEnabled={autoHandleEnabled}
             onSendMessage={sendMessage}
             onStopResponse={stopResponse}
             onClearMessages={clearMessages}
             onSendCliInput={sendCliInput}
-            onAutoHandleChange={setAutoHandleEnabled}
           />
 
           {/* Resize Handle - Vertical */}
@@ -492,7 +500,6 @@ User prompt: ${entry.prompt}`;
                   onEditBreakpointPrompt={handleEditBreakpointPrompt}
                   onDeleteBreakpoint={deleteBreakpoint}
                   onToggleBreakpoint={handleToggleBreakpoint}
-                  onToggleBreakpointPrompt={handleToggleBreakpointPrompt}
                   onDebuggerResume={debuggerResume}
                   onDebuggerStepOver={debuggerStepOver}
                   onDebuggerStepInto={debuggerStepInto}

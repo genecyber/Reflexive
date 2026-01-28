@@ -212,12 +212,12 @@ export function createLocalTools(options: LocalToolsOptions): AnyToolDefinition[
     );
   }
 
-  // Debug tools
+  // Debug tools (V8 Inspector for Node.js, DAP for Python/Go/etc.)
   if (debug) {
     tools.push(
       createTool(
         'debug_set_breakpoint',
-        'Set a real V8 debugger breakpoint at a specific file and line number. The process will pause when this line is executed.',
+        'Set a debugger breakpoint at a specific file and line number. Works for JavaScript/Node.js and Python. The process will pause when this line is executed.',
         {
           file: z.string().describe('Absolute path to the file'),
           line: z.number().describe('Line number (1-based)'),
@@ -242,7 +242,7 @@ export function createLocalTools(options: LocalToolsOptions): AnyToolDefinition[
 
       createTool(
         'debug_remove_breakpoint',
-        'Remove a V8 debugger breakpoint by its ID.',
+        'Remove a debugger breakpoint by its ID.',
         {
           breakpointId: z.string().describe('The breakpoint ID to remove')
         },
@@ -258,7 +258,7 @@ export function createLocalTools(options: LocalToolsOptions): AnyToolDefinition[
 
       createTool(
         'debug_list_breakpoints',
-        'List all V8 debugger breakpoints that have been set.',
+        'List all debugger breakpoints that have been set.',
         {},
         async () => {
           const breakpoints = processManager.debugListBreakpoints();
@@ -269,7 +269,7 @@ export function createLocalTools(options: LocalToolsOptions): AnyToolDefinition[
             `  ${bp.id}\n    File: ${bp.file}\n    Line: ${bp.line}` +
             (bp.condition ? `\n    Condition: ${bp.condition}` : '')
           ).join('\n\n');
-          return textResult(`V8 Debugger Breakpoints:\n\n${list}`);
+          return textResult(`Debugger Breakpoints:\n\n${list}`);
         }
       ),
 
