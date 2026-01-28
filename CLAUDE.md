@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Reflexive is an AI-powered introspection framework for Node.js applications using the Claude Agent SDK. It enables building applications by talking to them - an AI agent that lives inside your running application and can see logs, read source files, and modify code through chat conversation.
+Reflexive is an AI-powered introspection framework using the Claude Agent SDK. It enables building applications by talking to them - an AI agent that lives inside your running application and can see logs, read source files, set breakpoints, and modify code through chat conversation.
+
+**Supported Languages:** Node.js, Python, Go, .NET, Rust (debugging via V8 Inspector and Debug Adapter Protocol)
 
 ## Commands
 
@@ -29,21 +31,28 @@ npm run demo:legacy   # Run legacy single-file reflexive.js (no build)
 
 ### Three Operating Modes
 
-**Local Mode** - Spawn and monitor a child process:
+**Local Mode** - Spawn and monitor a child process (any supported language):
 ```bash
-reflexive [options] <script.js> [-- app-args]
+reflexive [options] <app.js|app.py|main.go> [-- app-args]
 ```
 
-**Sandbox Mode** - Run in isolated Vercel Sandbox:
+**Sandbox Mode** - Run in isolated Vercel Sandbox (Node.js only):
 ```bash
 reflexive --sandbox <script.js>
 ```
 
 **Library Mode** - Embed the agent inside your app:
 ```typescript
+// Node.js/TypeScript
 import { makeReflexive } from 'reflexive';
 const r = makeReflexive({ port: 3099, title: 'My App' });
 r.setState('key', value);
+```
+```python
+# Python (via python-sdk/)
+import reflexive
+r = reflexive.make_reflexive()
+r.set_state('key', value)
 ```
 
 ### Project Structure
@@ -54,9 +63,20 @@ src/
 ├── cli.ts                # CLI entry point
 ├── types/                # TypeScript type definitions
 │   ├── index.ts          # Core types (LogEntry, Capabilities, Config)
+│   ├── debug.ts          # Debug adapter types (DebugAdapter, LanguageRuntime)
 │   ├── sandbox.ts        # Sandbox-specific types
 │   ├── manager.ts        # Manager interface types
 │   └── mcp.ts            # MCP tool types
+├── adapters/             # Debug protocol adapters
+│   ├── v8-inspector-adapter.ts  # Node.js V8 Inspector Protocol
+│   └── dap-adapter.ts    # Debug Adapter Protocol (Python, Go, .NET, Rust)
+├── runtimes/             # Language runtime configurations
+│   ├── index.ts          # Runtime registry and detection
+│   ├── node.ts           # Node.js runtime
+│   ├── python.ts         # Python runtime (debugpy)
+│   ├── go.ts             # Go runtime (Delve)
+│   ├── dotnet.ts         # .NET runtime (netcoredbg)
+│   └── rust.ts           # Rust runtime (CodeLLDB)
 ├── core/                 # Core infrastructure
 │   ├── app-state.ts      # Circular log buffer, custom state store
 │   ├── config-loader.ts  # Config file discovery and merging
@@ -64,15 +84,16 @@ src/
 │   ├── chat-stream.ts    # SSE chat streaming via Claude Agent SDK
 │   └── http-server.ts    # Minimal HTTP server utilities
 ├── managers/             # Process and sandbox managers
-│   ├── process-manager.ts      # Child process spawning, restart logic
-│   ├── remote-debugger.ts      # V8 Inspector protocol client
+│   ├── process-manager.ts      # Child process spawning, multi-language debugging
+│   ├── remote-debugger.ts      # Legacy V8 Inspector client (deprecated)
 │   ├── sandbox-manager.ts      # Single Vercel Sandbox wrapper
 │   └── multi-sandbox-manager.ts # Multi-tenant sandbox pool
 ├── mcp/                  # MCP tool definitions
 │   ├── tools.ts          # Base tool helpers (createTool, textResult)
 │   ├── local-tools.ts    # Tools for local file operations
-│   ├── cli-tools.ts      # Tools for CLI mode (process control, logs)
+│   ├── cli-tools.ts      # Tools for CLI mode (process control, logs, debugging)
 │   ├── sandbox-tools.ts  # Tools for sandbox mode
+│   ├── knowledge-tools.ts # Self-documentation tool
 │   └── hosted-tools.ts   # Tools for hosted multi-tenant mode
 ├── sandbox/              # Sandbox utilities
 │   ├── inject.ts         # Sandbox injection script
@@ -82,11 +103,13 @@ src/
 │   ├── routes.ts         # REST endpoint definitions
 │   └── auth.ts           # API key auth and rate limiting
 └── __tests__/            # Test suites (vitest)
-    ├── unit/             # Unit tests
-    ├── integration/      # Integration tests
-    ├── e2e/              # End-to-end tests
-    ├── fixtures/         # Test fixtures
-    └── mocks/            # Mock implementations
+
+python-sdk/               # Python SDK for library mode
+├── reflexive/            # Python package
+│   ├── __init__.py
+│   ├── core.py           # make_reflexive() implementation
+│   └── app_state.py      # State management
+└── examples/             # Python examples
 ```
 
 ### Dashboard Server
@@ -127,11 +150,11 @@ Agent capabilities are exposed as MCP tools with Zod-validated parameters:
 Dangerous operations are gated behind flags:
 - `--write` - Allow file modifications
 - `--shell` - Allow shell command execution
-- `--inject` - Enable deep console/diagnostic injection
-- `--eval` - Enable runtime code evaluation (DANGEROUS)
-- `--debug` - Enable V8 Inspector debugging
+- `--inject` - Enable deep console/diagnostic injection (Node.js only)
+- `--eval` - Enable runtime code evaluation (Node.js only, DANGEROUS)
+- `--debug` - Enable multi-language debugging (V8 Inspector for Node.js, DAP for Python/Go/.NET/Rust)
 - `--watch` - Hot-reload on file changes
-- `--sandbox` - Run in Vercel Sandbox
+- `--sandbox` - Run in Vercel Sandbox (Node.js only)
 - `--dangerously-skip-permissions` - Enable ALL capabilities
 
 ## Configuration
@@ -148,12 +171,19 @@ See `reflexive.config.example.js` for all options.
 **Runtime:**
 - `@anthropic-ai/claude-agent-sdk` - Claude AI integration
 - `zod` - Parameter validation for MCP tools
-- `ws` - WebSocket for V8 Inspector protocol
+- `ws` - WebSocket for debugger protocols
 - `ms` - Time string parsing
+- `node-debugprotocol-client` - DAP client for multi-language debugging
 
 **Optional (for advanced features):**
 - `@vercel/sandbox` - Sandbox mode isolation
 - `@aws-sdk/client-s3` - S3 snapshot storage
+
+**Language-Specific Debuggers (install separately):**
+- Python: `pip install debugpy`
+- Go: `go install github.com/go-delve/delve/cmd/dlv@latest`
+- .NET: Install netcoredbg
+- Rust: Install CodeLLDB
 
 ## Authentication
 

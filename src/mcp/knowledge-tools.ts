@@ -108,6 +108,7 @@ function listDocs(): string {
     '| `getting-started` | Installation, authentication, first steps |',
     '| `user-guide` | CLI usage, dashboard, configuration, watch triggers |',
     '| `api-reference` | Library API, MCP Server Mode, REST API, MCP tools |',
+    '| `python-sdk` | Python SDK for embedding Reflexive in Python apps |',
     '| `mcp` or `mcp-server` | MCP Server Mode for Claude Code, Claude Desktop, ChatGPT |',
     '| `developer-guide` | Architecture, code structure, contributing |',
     '| `deployment` | Railway, Docker, production deployment |',
@@ -200,7 +201,7 @@ function listDocs(): string {
     '```',
     '',
     'Tools available to connected agents:',
-    '- `run_app` - start or switch to a different Node.js app',
+    '- `run_app` - start or switch to a different app (Node.js, Python, Go, etc.)',
     '- `get_process_state`, `get_output_logs`, `restart_process`, `stop_process`',
     '- `read_file`, `write_file`, `edit_file`, `list_directory` (with --write)',
     '- `exec_shell` (with --shell)',
@@ -260,18 +261,21 @@ export function createKnowledgeTool(): McpTool {
     'reflexive_self_knowledge',
     `Get detailed documentation about Reflexive's capabilities.
 
+Reflexive supports multiple languages: Node.js, Python, Go, .NET, and Rust.
+
 Use this tool when you need to:
 - Help users write code that uses Reflexive features
 - Understand the API for makeReflexive, chat(), setState(), etc.
 - Explain how to create hybrid AI-native applications
 - Look up CLI options, configuration, or deployment options
+- Learn about multi-language debugging (Python, Go, .NET, Rust)
 
-Topics: overview, getting-started, user-guide, api-reference, developer-guide, deployment
+Topics: overview, getting-started, user-guide, api-reference, python-sdk, developer-guide, deployment
 
 Call with no topic to see a quick reference and list of available topics.`,
     {
       topic: z.string().optional().describe(
-        'Documentation topic to retrieve. Options: overview, getting-started, user-guide, api-reference, developer-guide, deployment. Omit for quick reference.'
+        'Documentation topic to retrieve. Options: overview, getting-started, user-guide, api-reference, python-sdk, developer-guide, deployment. Omit for quick reference.'
       ),
     },
     async ({ topic }) => {

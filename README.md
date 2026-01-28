@@ -4,45 +4,37 @@
 
 [View full video (mp4)](demo1_clipped_4x.mp4)
 
-Embed Claude inside your running Node.js app. It sees logs, reads source, edits files, sets breakpoints, and responds to runtime events.
+Embed Claude inside your running application. It sees logs, reads source, edits files, sets breakpoints, and responds to runtime events.
+
+**Supports:** Node.js, Python, Go, .NET, Rust
 
 ## Quickstart
 
 ```bash
+# Node.js
 echo "console.log('hello')" > app.js
 npx reflexive --write app.js
-# Open http://localhost:3099
-# Say: "Turn this into an Express server with a /users endpoint"
+
+# Python
+echo "print('hello')" > app.py
+npx reflexive --write app.py
+
+# Open http://localhost:3099 and chat with your app
 ```
 
 ## Oneliner
 ```bash
-npm i -g reflexive 
+npm i -g reflexive
 echo "console.log('hello')" > app.js; reflexive --write --inject --open app.js
 ```
 
-## Versions
-
-As of v0.2.0, the default `reflexive` command uses:
-- **TypeScript CLI** - Modular architecture with separate managers for process, sandbox, and debugging
-- **Next.js Dashboard** - Modern React UI with real-time log streaming, ANSI color support, and watch triggers
-
-The original single-file JavaScript version is still available:
-
-```bash
-# Use legacy single-file JavaScript version
-reflexive-legacy ./app.js
-```
-
-Both versions have the same CLI interface and capabilities.
-
 ## What This Is
 
-Claude Agent SDK (Claude Code as a library) + your running Node.js process = an agent that:
+Claude Agent SDK (Claude Code as a library) + your running application = an agent that:
 
 - **Agent loop** - keeps working until done, tool calls, retries, reasoning
 - **Process lifecycle** - start, stop, restart, watch for file changes
-- **V8 debugger** - real breakpoints, stepping, scope inspection via Inspector protocol
+- **Multi-language debugging** - breakpoints, stepping, scope inspection (Node.js, Python, Go, .NET, Rust)
 - **Watch triggers** - pattern-match logs and auto-prompt the agent
 - **File read/write + shell** - behind explicit flags
 
@@ -54,9 +46,9 @@ Claude Agent SDK (Claude Code as a library) + your running Node.js process = an 
 |  - Process control, file ops, shell                     |
 |                                                         |
 |  +---------------------------------------------------+  |
-|  |  your-app.js (child process)                      |  |
+|  |  your-app.js / app.py / main.go (child process)   |  |
 |  |  - stdout/stderr captured                         |  |
-|  |  - Optional: deep instrumentation via --inject    |  |
+|  |  - Optional: deep instrumentation (Node.js)       |  |
 |  +---------------------------------------------------+  |
 +---------------------------------------------------------+
 ```
@@ -71,9 +63,9 @@ Capabilities require explicit opt-in:
 |------|---------|
 | `--write` | File modification |
 | `--shell` | Shell command execution |
-| `--inject` | Deep instrumentation (console intercept, diagnostics, perf metrics) |
-| `--eval` | Runtime code evaluation (implies --inject) |
-| `--debug` | V8 Inspector debugging (breakpoints, stepping, scope inspection) |
+| `--inject` | Deep instrumentation (Node.js only: console intercept, diagnostics, perf metrics) |
+| `--eval` | Runtime code evaluation (Node.js only, implies --inject) |
+| `--debug` | Multi-language debugging (breakpoints, stepping, scope inspection) |
 
 This is a development tool. For production, use read-only mode.
 
@@ -108,13 +100,13 @@ reflexive [options] [entry-file] [-- app-args...]
 -i, --interactive       Proxy stdin/stdout for CLI apps
     --mcp               Run as MCP server for external AI agents
     --no-webui          Disable web dashboard (MCP mode only)
-    --inject            Deep instrumentation
-    --eval              Runtime eval (DANGEROUS)
--d, --debug             V8 Inspector debugging
+    --inject            Deep instrumentation (Node.js only)
+    --eval              Runtime eval (Node.js only, DANGEROUS)
+-d, --debug             Multi-language debugging (breakpoints, stepping)
     --write             Enable file writing
     --shell             Enable shell access
     --dangerously-skip-permissions  Enable everything
-    --node-args <args>  Pass args to Node.js
+    --node-args <args>  Pass args to Node.js (Node.js only)
 ```
 
 ### Examples
@@ -123,13 +115,18 @@ reflexive [options] [entry-file] [-- app-args...]
 # Basic - read-only monitoring
 npx reflexive ./server.js
 
+# Python app
+npx reflexive ./app.py
+
 # Development - full control
 npx reflexive --write --shell --watch ./server.js
 
-# Debugging - set breakpoints, step through code
-npx reflexive --debug ./server.js
+# Debugging - set breakpoints, step through code (any language)
+npx reflexive --debug ./server.js    # Node.js
+npx reflexive --debug ./app.py       # Python (requires: pip install debugpy)
+npx reflexive --debug ./main.go      # Go (requires: dlv)
 
-# Deep instrumentation - GC stats, event loop, HTTP tracking
+# Deep instrumentation - GC stats, event loop, HTTP tracking (Node.js only)
 npx reflexive --inject ./server.js
 
 # MCP server - let Claude Code or other AI agents control your app
@@ -143,7 +140,7 @@ npx reflexive ./server.js -- --port 8080
 
 Run reflexive as an MCP server that external AI agents can connect to. This lets you control your app from Claude Code, Claude Desktop, ChatGPT, or any MCP-compatible client.
 
-The MCP server can run with or without a pre-specified app - use the `run_app` tool to dynamically start or switch between different Node.js applications.
+The MCP server can run with or without a pre-specified app - use the `run_app` tool to dynamically start or switch between different applications (Node.js, Python, Go, etc.).
 
 ```bash
 # Start with a specific app
@@ -207,7 +204,7 @@ When running as an MCP server, these tools are available to connected agents:
 
 | Tool | Description |
 |------|-------------|
-| `run_app` | Start or switch to a different Node.js app |
+| `run_app` | Start or switch to a different app (Node.js, Python, Go, etc.) |
 | `get_process_state` | Get app status (PID, uptime, running state) |
 | `get_output_logs` | Get stdout/stderr logs |
 | `restart_process` | Restart the app |
@@ -223,8 +220,8 @@ When running as an MCP server, these tools are available to connected agents:
 | `chat` | Chat with embedded Reflexive agent |
 | `reflexive_self_knowledge` | Get Reflexive documentation |
 
-With `--debug`: `debug_set_breakpoint`, `debug_resume`, `debug_step_*`, etc.
-With `--eval`: `evaluate_in_app`, `list_app_globals`
+With `--debug`: `debug_set_breakpoint`, `debug_resume`, `debug_step_*`, etc. (all languages)
+With `--eval`: `evaluate_in_app`, `list_app_globals` (Node.js only)
 
 ### Dynamic App Switching
 
@@ -242,9 +239,9 @@ The web dashboard also supports file picking to switch apps via the browser's Fi
 
 ---
 
-## Library Mode
+## Library Mode (Node.js/TypeScript)
 
-Embed the agent inside your app for deeper introspection.
+Embed the agent inside your Node.js app for deeper introspection. A [Python SDK](./python-sdk/) is also available.
 
 **Note:** Web UI is disabled by default for security. The `chat()` function works regardless.
 
@@ -388,9 +385,9 @@ Use cases:
 - "When 'user signed up' appears, summarize the signup"
 - "When memory exceeds 500MB, analyze what's using it"
 
-## Injection Mode
+## Injection Mode (Node.js Only)
 
-With `--inject`, your app gets automatic instrumentation without code changes:
+With `--inject`, your Node.js app gets automatic instrumentation without code changes:
 
 | What's Captured | Source |
 |-----------------|--------|
@@ -409,9 +406,9 @@ if (process.reflexive) {
 }
 ```
 
-## Runtime Eval
+## Runtime Eval (Node.js Only)
 
-With `--eval`, the agent can execute code in your running app:
+With `--eval`, the agent can execute JavaScript in your running Node.js app:
 
 ```
 You: "What's in the config object?"
@@ -450,7 +447,8 @@ npm run demo:ai       # AI-powered endpoints
 ## Links
 
 - Built on [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code/agent-sdk) (Claude Code as a library)
-- TypeScript CLI with Next.js dashboard (legacy single-file version available via `reflexive-legacy`)
+- TypeScript CLI with Next.js dashboard
+- [Python SDK](./python-sdk/) for embedding in Python apps
 - [Troubleshooting](./FAILURES.md)
 
 ## License

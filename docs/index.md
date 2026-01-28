@@ -124,17 +124,25 @@ Practical examples for all operating modes, including library mode integration, 
 
 ## Version Information
 
-**Current Version**: 0.2.0
+**Current Version**: 1.0.13
 
 **Requirements**:
-- Node.js >= 18.0.0
+- Node.js >= 18.0.0 (for running Reflexive CLI)
 - Claude API access (via Claude Code CLI or API key)
+
+**Supported Languages**:
+- Node.js/TypeScript - Full support including injection and eval
+- Python - Debugging via debugpy (`pip install debugpy`)
+- Go - Debugging via Delve (`go install github.com/go-delve/delve/cmd/dlv@latest`)
+- .NET - Debugging via netcoredbg
+- Rust - Debugging via CodeLLDB
 
 **Runtime Dependencies**:
 - `@anthropic-ai/claude-agent-sdk` - Claude AI integration
 - `zod` - Parameter validation for MCP tools
-- `ws` - WebSocket for V8 Inspector protocol
+- `ws` - WebSocket for debugger protocols
 - `ms` - Time string parsing
+- `node-debugprotocol-client` - DAP client for multi-language debugging
 
 **Optional Dependencies**:
 - `@vercel/sandbox` - Sandbox mode isolation
