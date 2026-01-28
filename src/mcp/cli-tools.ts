@@ -212,18 +212,25 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
     );
   }
 
-  // V8 Inspector debugging tools (only when --debug flag is set)
+  // Debugger tools (V8 Inspector for Node.js, DAP for Python/Go/etc.) - only when --debug flag is set
   if (debug) {
     tools.push(
       createTool(
         'debug_set_breakpoint',
-        'Set a real V8 debugger breakpoint at a specific file and line number. Requires --debug flag. The process will pause when this line is executed.',
+        'Set a debugger breakpoint at a specific file and line number. Works for both JavaScript/Node.js (V8 Inspector) and Python (debugpy/DAP). The process will pause when this line is executed.',
         {
           file: z.string().describe('Absolute path to the file'),
           line: z.number().describe('Line number (1-based)'),
           condition: z.string().optional().describe('Optional JavaScript condition expression (e.g., "x > 5")')
         },
-        async ({ file, line, condition }) => {
+        async (input) => {
+          const { file, line, condition } = input as { file: string; line: number; condition?: string };
+          console.error('[debug_set_breakpoint] Received input:', JSON.stringify(input));
+
+          if (!file) {
+            return errorResult(`Invalid file path: ${file}. Received input: ${JSON.stringify(input)}`);
+          }
+
           if (!processManager.isDebuggerConnected()) {
             return textResult('Debugger not connected. The process may still be starting.');
           }
@@ -239,7 +246,7 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
 
       createTool(
         'debug_remove_breakpoint',
-        'Remove a V8 debugger breakpoint by its ID.',
+        'Remove a debugger breakpoint by its ID.',
         {
           breakpointId: z.string().describe('The breakpoint ID to remove (from debug_set_breakpoint or debug_list_breakpoints)')
         },
@@ -255,7 +262,7 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
 
       createTool(
         'debug_list_breakpoints',
-        'List all V8 debugger breakpoints that have been set.',
+        'List all debugger breakpoints that have been set.',
         {},
         async () => {
           const breakpoints = processManager.debugListBreakpoints();
@@ -267,7 +274,7 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
             `  ${bp.id}\n    File: ${bp.file}\n    Line: ${bp.line}${bp.condition ? `\n    Condition: ${bp.condition}` : ''}`
           ).join('\n\n');
 
-          return textResult(`V8 Debugger Breakpoints:\n\n${list}`);
+          return textResult(`Debugger Breakpoints:\n\n${list}`);
         }
       ),
 
@@ -291,12 +298,12 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
 
       createTool(
         'debug_pause',
-        'Pause execution immediately. The debugger will stop at the next JavaScript statement.',
+        'Pause execution immediately. The debugger will stop at the next statement.',
         {},
         async () => {
           try {
             await processManager.debugPause();
-            return textResult('Pause requested. Execution will stop at the next JavaScript statement.');
+            return textResult('Pause requested. Execution will stop at the next statement.');
           } catch (err) {
             return errorResult(`Failed to pause: ${(err as Error).message}`);
           }
@@ -420,7 +427,7 @@ export function createCliTools(options: CliToolsOptions): AnyToolDefinition[] {
 
       createTool(
         'debug_get_state',
-        'Get the current state of the V8 debugger: connected status, paused status, breakpoints, and call stack.',
+        'Get the current state of the debugger: connected status, paused status, breakpoints, and call stack. Works for Node.js (V8) and Python (DAP).',
         {},
         async () => {
           const state = processManager.getDebuggerState();

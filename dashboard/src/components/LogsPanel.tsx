@@ -42,6 +42,23 @@ const INJECT_TEXT_COLORS: Record<string, string> = {
   'border-lime-500 text-lime-500 bg-lime-500/10': 'text-lime-500',
 };
 
+// Format uptime for display (handles hours, minutes, seconds)
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h${mins > 0 ? mins : ''}`;
+}
+
+// Get color based on memory usage percentage
+function getMemoryColor(ratio: number): string {
+  if (ratio < 0.5) return '#22c55e'; // green
+  if (ratio < 0.75) return '#eab308'; // yellow
+  if (ratio < 0.9) return '#f97316'; // orange
+  return '#ef4444'; // red
+}
+
 const LOG_TYPE_COLORS: Record<string, string> = {
   stdout: 'text-green-500',
   info: 'text-green-500',
@@ -409,22 +426,127 @@ export function LogsPanel({ logs, status, showControls, debugPanelsHeight, watch
             <div ref={logsEndRef} />
           </div>
 
-          {/* Metrics footer */}
-          <div className="flex gap-4 px-3 py-2.5 bg-zinc-950 border-t border-zinc-800 text-xs">
-            <div className="flex gap-1">
-              <span className="text-zinc-500">PID:</span>
-              <span className="text-white">{status?.pid || '--'}</span>
+          {/* Metrics footer with visual gauges */}
+          <div className="flex items-center gap-4 px-3 py-3 bg-zinc-950 border-t border-zinc-800">
+            {/* PID Badge */}
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">PID</span>
+              <span className="text-xs font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-900">
+                {status?.pid || '--'}
+              </span>
             </div>
-            <div className="flex gap-1">
-              <span className="text-zinc-500">Uptime:</span>
-              <span className="text-white">{status?.uptime || 0}s</span>
+
+            {/* Uptime Ring Gauge */}
+            <div className="flex flex-col items-center">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">Uptime</span>
+              <div className="relative">
+                <svg width="44" height="44" viewBox="0 0 44 44" className="transform -rotate-90">
+                  {/* Background ring */}
+                  <circle
+                    cx="22"
+                    cy="22"
+                    r="18"
+                    fill="none"
+                    stroke="#27272a"
+                    strokeWidth="4"
+                  />
+                  {/* Progress ring - cycles every 60 seconds */}
+                  <circle
+                    cx="22"
+                    cy="22"
+                    r="18"
+                    fill="none"
+                    stroke="url(#uptimeGradient)"
+                    strokeWidth="4"
+                    strokeLinecap="round"
+                    strokeDasharray={`${((status?.uptime || 0) % 60) / 60 * 113} 113`}
+                    className="transition-all duration-1000"
+                  />
+                  <defs>
+                    <linearGradient id="uptimeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="100%" stopColor="#06b6d4" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-white">
+                  {formatUptime(status?.uptime || 0)}
+                </span>
+              </div>
             </div>
-            {showControls && (
-              <div className="flex gap-1">
-                <span className="text-zinc-500">Restarts:</span>
-                <span className="text-white">{status?.restartCount || 0}</span>
+
+            {/* Memory Gauge (if available) */}
+            {status?.memoryUsage && (
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">Memory</span>
+                <div className="relative">
+                  <svg width="44" height="44" viewBox="0 0 44 44" className="transform -rotate-90">
+                    {/* Background ring */}
+                    <circle
+                      cx="22"
+                      cy="22"
+                      r="18"
+                      fill="none"
+                      stroke="#27272a"
+                      strokeWidth="4"
+                    />
+                    {/* Usage ring */}
+                    <circle
+                      cx="22"
+                      cy="22"
+                      r="18"
+                      fill="none"
+                      stroke={getMemoryColor(status.memoryUsage.heapUsed / status.memoryUsage.heapTotal)}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      strokeDasharray={`${(status.memoryUsage.heapUsed / status.memoryUsage.heapTotal) * 113} 113`}
+                      className="transition-all duration-500"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-white">
+                    {Math.round(status.memoryUsage.heapUsed / 1024 / 1024)}M
+                  </span>
+                </div>
               </div>
             )}
+
+            {/* Restarts Counter */}
+            {showControls && (
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] text-zinc-500 uppercase tracking-wider mb-0.5">Restarts</span>
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-xs font-mono ${
+                  (status?.restartCount || 0) === 0
+                    ? 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                    : 'bg-amber-950/50 text-amber-400 border border-amber-800'
+                }`}>
+                  {status?.restartCount || 0}
+                </div>
+              </div>
+            )}
+
+            {/* Mini sparkline area for visual interest */}
+            <div className="flex-1 flex justify-end">
+              <svg width="60" height="24" viewBox="0 0 60 24" className="opacity-30">
+                <path
+                  d="M0,20 Q5,18 10,16 T20,12 T30,14 T40,8 T50,10 T60,6"
+                  fill="none"
+                  stroke="#3b82f6"
+                  strokeWidth="1.5"
+                  className="animate-pulse"
+                />
+                <path
+                  d="M0,20 Q5,18 10,16 T20,12 T30,14 T40,8 T50,10 T60,6 L60,24 L0,24 Z"
+                  fill="url(#sparklineGradient)"
+                  opacity="0.3"
+                />
+                <defs>
+                  <linearGradient id="sparklineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor="#3b82f6" />
+                    <stop offset="100%" stopColor="transparent" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
           </div>
         </>
       )}

@@ -59,10 +59,17 @@ export interface Breakpoint {
 }
 
 export interface CallFrame {
-  functionName: string;
-  url: string;
-  lineNumber: number;
-  columnNumber: number;
+  id?: string;
+  // DAP format (from backend)
+  name?: string;
+  source?: { path?: string; sourceReference?: number };
+  line?: number;
+  column?: number;
+  // V8 format (alternative)
+  functionName?: string;
+  url?: string;
+  lineNumber?: number;
+  columnNumber?: number;
 }
 
 export interface DebuggerStatus {
@@ -73,6 +80,7 @@ export interface DebuggerStatus {
   triggeredPrompts?: {
     breakpoint: Breakpoint;
     callFrames: CallFrame[];
+    timestamp: number;
   }[];
 }
 

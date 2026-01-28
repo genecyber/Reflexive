@@ -410,15 +410,10 @@ export class ProcessManager {
       });
     }
 
-    // For DAP-based debuggers (non-Node), attempt connection after a short delay
-    // since they may not output a "ready" message like V8 Inspector does
+    // For DAP-based debuggers (non-Node), connect immediately with retry
+    // since they use --wait-for-client and should be ready on startup
     if (this.debug && this.currentRuntime && this.currentRuntime.protocol === 'dap') {
-      setTimeout(() => {
-        if (this._isRunning && !this.debugConnectionInfo) {
-          this._log('system', `[debug] Attempting DAP connection to port ${this.debugPort}...`);
-          this._connectDebugger({ port: this.debugPort, host: '127.0.0.1' });
-        }
-      }, 1000); // Give debugpy a second to start listening
+      this._connectDAPWithRetry(this.debugPort, 5, 200);
     }
   }
 
@@ -685,8 +680,30 @@ export class ProcessManager {
         }
 
         // Check if any hit breakpoint has a prompt to trigger
-        if (pauseData.hitBreakpointIds && pauseData.hitBreakpointIds.length > 0) {
-          for (const bpId of pauseData.hitBreakpointIds) {
+        let hitBpIds = pauseData.hitBreakpointIds || [];
+
+        // Fallback: if reason is 'breakpoint' but no hitBreakpointIds provided,
+        // try to match by location from the call stack
+        if (hitBpIds.length === 0 && pauseData.reason === 'breakpoint') {
+          const callFrames = await this.debugAdapter?.getCallStack().catch(() => []) || [];
+          if (callFrames.length > 0) {
+            const topFrame = callFrames[0];
+            const frameLine = topFrame.line;
+            const framePath = topFrame.source?.path || '';
+
+            // Find breakpoints matching this location
+            for (const bp of this.persistedBreakpoints) {
+              // Match by line and file path (handle path normalization)
+              if (bp.line === frameLine && framePath.endsWith(bp.file.split('/').pop() || '')) {
+                hitBpIds.push(bp.id);
+                this._log('debug', `Matched breakpoint ${bp.id} by location: ${framePath}:${frameLine}`);
+              }
+            }
+          }
+        }
+
+        if (hitBpIds.length > 0) {
+          for (const bpId of hitBpIds) {
             const bp = this.persistedBreakpoints.find(b => b.id === bpId);
             if (bp && bp.prompt && bp.promptEnabled) {
               bp.hitCount = (bp.hitCount || 0) + 1;
@@ -755,6 +772,28 @@ export class ProcessManager {
     }
   }
 
+  /**
+   * Connect to DAP debugger with retry logic
+   * DAP debuggers like debugpy need a moment to bind to the port after process starts
+   */
+  private async _connectDAPWithRetry(port: number, maxAttempts: number, delayMs: number): Promise<void> {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (!this._isRunning) return;
+      if (this.debugConnectionInfo) return; // Already connected
+
+      this._log('system', `[debug] Connecting to DAP debugger on port ${port}${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
+      await this._connectDebugger({ port, host: '127.0.0.1' });
+
+      // Check if connection succeeded (debugConnectionInfo is set on success)
+      if (this.debugConnectionInfo) return;
+
+      // Connection failed, wait before retry
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
+  }
+
   // Debugger API methods
 
   /**
@@ -763,6 +802,9 @@ export class ProcessManager {
   async debugSetBreakpoint(file: string, line: number, condition?: string): Promise<{ breakpointId: string }> {
     if (!this.debugAdapter || !this.debuggerReady) {
       throw new Error('Debugger not connected');
+    }
+    if (!file || typeof file !== 'string') {
+      throw new Error(`Invalid file path: ${file}`);
     }
     // Resolve to absolute path for consistency
     const absFile = resolve(file);
@@ -830,12 +872,21 @@ export class ProcessManager {
   }
 
   /**
-   * Get and clear triggered breakpoint prompts (dashboard consumes these)
+   * Get triggered breakpoint prompts (does NOT clear them)
    */
   getTriggeredBreakpointPrompts(): TriggeredBreakpointPrompt[] {
-    const prompts = [...this.triggeredBreakpointPrompts];
-    this.triggeredBreakpointPrompts = [];
-    return prompts;
+    return [...this.triggeredBreakpointPrompts];
+  }
+
+  /**
+   * Clear triggered breakpoint prompts by their timestamps
+   * Call this after successfully processing the prompts
+   */
+  clearTriggeredBreakpointPrompts(timestamps: number[]): void {
+    const timestampSet = new Set(timestamps);
+    this.triggeredBreakpointPrompts = this.triggeredBreakpointPrompts.filter(
+      p => !timestampSet.has(p.timestamp)
+    );
   }
 
   /**

@@ -190,7 +190,11 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
   /**
    * Initialize the debug session
    *
-   * DAP sequence: initialize → attach → (wait for initialized event) → configurationDone
+   * DAP sequence for debugpy (and similar):
+   * 1. initialize → wait for response
+   * 2. attach (fire and forget - response comes AFTER configurationDone)
+   * 3. wait for initialized event
+   * 4. configurationDone → script starts running
    */
   async initialize(): Promise<void> {
     if (!this.client || this._initialized) return;
@@ -216,14 +220,12 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
       supportsProgressReporting: false,
     });
 
-    // Send attach request - for debugpy with --wait-for-client, this tells it we're connected
-    // debugpy expects a 'connect' object with host and port per VSCode's configuration spec
-    await this.client.attach({
-      connect: {
-        host: this.connectionHost,
-        port: this.connectionPort,
-      },
-    } as Record<string, unknown>);
+    // Send attach request - DO NOT await!
+    // debugpy sends the attach response AFTER configurationDone, not before.
+    // We fire it and wait for the initialized event instead.
+    this.client.attach({ justMyCode: true } as Record<string, unknown>).catch(() => {
+      // Ignore - response may come late or connection may close
+    });
 
     // Wait for initialized event (with timeout)
     const timeoutPromise = new Promise<void>((_, reject) => {
@@ -256,6 +258,9 @@ export class DAPAdapter extends EventEmitter implements DebugAdapter {
   async setBreakpoint(file: string, line: number, condition?: string): Promise<BreakpointResult> {
     if (!this.client) {
       throw new Error('Not connected to DAP server');
+    }
+    if (!file || typeof file !== 'string') {
+      throw new Error(`Invalid file path for breakpoint: received ${typeof file}`);
     }
 
     // Get existing breakpoints for this file
