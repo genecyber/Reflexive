@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { StatusBadge } from './Header';
+import { ansiToHtml } from '@/utils/ansi';
 
 // Regex to match tool call patterns: 🔧 **tool_name** (params) or 🔧 **tool_name**
 const TOOL_CALL_REGEX = /🔧 \*\*([^*]+)\*\*(?:\s*\(([^)]+)\))?/g;
@@ -99,6 +100,8 @@ interface Message {
   isBreakpointPrompt?: boolean;
   breakpointInfo?: { file: string; line: number };
   isAutoTrigger?: boolean;
+  isCliOutput?: boolean;   // CLI stdout/stderr streamed to chat
+  isCliInput?: boolean;    // User input sent directly to CLI
 }
 
 interface ChatPanelProps {
@@ -173,7 +176,11 @@ export function ChatPanel({
           <div key={msg.id} className="message" style={{ marginBottom: '12px' }}>
             {/* message-meta - EXACT original */}
             <div className="message-meta">
-              {msg.isWatchTrigger && msg.role === 'assistant'
+              {msg.isCliOutput
+                ? 'cli → you'
+                : msg.isCliInput
+                ? 'you → cli'
+                : msg.isWatchTrigger && msg.role === 'assistant'
                 ? `👁 watch triggered: ${msg.watchPattern?.slice(0, 30) || ''}`
                 : msg.isBreakpointPrompt && msg.role === 'assistant'
                 ? `🔴 breakpoint hit: ${msg.breakpointInfo?.file.split('/').pop() || ''}:${msg.breakpointInfo?.line || ''}`
@@ -181,26 +188,52 @@ export function ChatPanel({
                 ? 'agent (auto)'
                 : msg.role}
             </div>
-            {/* bubble - EXACT original backgrounds and margins */}
-            <div
-              className="bubble"
-              style={{
-                background: msg.role === 'user' ? '#1e3a5f' : '#1a1a24',
-                marginLeft: msg.role === 'user' ? '30px' : undefined,
-                marginRight: msg.role === 'assistant' ? '30px' : undefined,
-                borderLeft: msg.isWatchTrigger && msg.role === 'assistant'
-                  ? '3px solid #3b82f6'
-                  : msg.isBreakpointPrompt && msg.role === 'assistant'
-                  ? '3px solid #ef4444'
-                  : undefined,
-              }}
-            >
-              {msg.role === 'assistant' ? (
-                <MessageContent content={msg.content} />
-              ) : (
-                msg.content
-              )}
-            </div>
+            {/* bubble - styling for different message types */}
+            {msg.isCliOutput ? (
+              // CLI output: innerHTML directly on bubble (no span wrapper), green styling
+              <div
+                className="bubble"
+                style={{
+                  background: '#0a2818',
+                  fontFamily: "'SF Mono', Monaco, monospace",
+                  fontSize: '0.8rem',
+                  whiteSpace: 'pre-wrap',
+                  borderLeft: '3px solid #22c55e',
+                }}
+                dangerouslySetInnerHTML={{ __html: ansiToHtml(msg.content) }}
+              />
+            ) : msg.isCliInput ? (
+              // CLI input: EXACT match of old reflexive.js lines 2460-2464
+              <div
+                className="bubble"
+                style={{
+                  background: '#1a2e1a',
+                  fontFamily: "'SF Mono', Monaco, monospace",
+                }}
+              >
+                {msg.content}
+              </div>
+            ) : (
+              <div
+                className="bubble"
+                style={{
+                  background: msg.role === 'user' ? '#1e3a5f' : '#1a1a24',
+                  marginLeft: msg.role === 'user' ? '30px' : undefined,
+                  marginRight: msg.role === 'assistant' ? '30px' : undefined,
+                  borderLeft: msg.isWatchTrigger && msg.role === 'assistant'
+                    ? '3px solid #3b82f6'
+                    : msg.isBreakpointPrompt && msg.role === 'assistant'
+                    ? '3px solid #ef4444'
+                    : undefined,
+                }}
+              >
+                {msg.role === 'assistant' ? (
+                  <MessageContent content={msg.content} />
+                ) : (
+                  msg.content
+                )}
+              </div>
+            )}
           </div>
         ))}
 

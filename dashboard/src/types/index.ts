@@ -99,6 +99,9 @@ export interface ChatMessage {
   };
   isWatchTrigger?: boolean;
   watchPattern?: string;
+  isCliOutput?: boolean;   // CLI stdout/stderr streamed to chat
+  isCliInput?: boolean;    // User input sent directly to CLI
+  isAutoTrigger?: boolean; // Auto-triggered by CLI output
 }
 
 export interface ToolCall {

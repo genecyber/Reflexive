@@ -66,7 +66,48 @@ export default function Dashboard() {
     sendMessage,
     stopResponse,
     clearMessages,
+    addCliOutput,
+    addCliInput,
   } = useChat();
+
+  // Auto-handle state for agent to continue after CLI output
+  const [autoHandleEnabled, setAutoHandleEnabled] = useState(false);
+
+  // Stream CLI output to chat (like old UI) - detect new stdout/stderr from logs
+  const lastLogTimestampRef = useRef<string>('');
+  useEffect(() => {
+    if (!status?.interactive || logs.length === 0 || isLoading) return;
+
+    // Find new logs since last check
+    const newLogs = logs.filter(l => l.timestamp > lastLogTimestampRef.current);
+    if (newLogs.length === 0) return;
+
+    // Batch consecutive stdout/stderr into single messages (like old UI)
+    let currentBatch: string[] = [];
+    let currentType: string | null = null;
+
+    const flushBatch = () => {
+      if (currentBatch.length === 0) return;
+      const content = currentBatch.join('\n');
+      if (content.trim()) {
+        addCliOutput(content, currentType === 'stderr');
+      }
+      currentBatch = [];
+    };
+
+    for (const log of newLogs) {
+      if (log.type === 'stdout' || log.type === 'stderr') {
+        if (currentType !== null && currentType !== log.type) {
+          flushBatch();
+        }
+        currentType = log.type;
+        currentBatch.push(log.message);
+      }
+    }
+    flushBatch();
+
+    lastLogTimestampRef.current = logs[logs.length - 1].timestamp;
+  }, [logs, status?.interactive, isLoading, addCliOutput]);
 
   // Watch state with localStorage persistence
   const WATCH_STORAGE_KEY = 'reflexive-watches';
@@ -142,8 +183,18 @@ export default function Dashboard() {
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [debugPanelsHeight, setDebugPanelsHeight] = useState(180);
 
-  // Right panel collapsed state
+  // Right panel collapsed state - default to collapsed in interactive mode
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+  const interactiveModeInitRef = useRef(false);
+
+  // Collapse right panel by default in interactive mode
+  useEffect(() => {
+    if (interactiveModeInitRef.current) return;
+    if (status?.interactive) {
+      interactiveModeInitRef.current = true;
+      setIsRightPanelCollapsed(true);
+    }
+  }, [status?.interactive]);
 
   // Process the aggregated watch queue when agent finishes
   const processWatchQueue = useCallback(() => {
@@ -172,7 +223,7 @@ Timestamps: [${timestampList}]
 
 User prompt: ${entry.prompt}`;
 
-    sendMessage(contextMsg, { isWatchTrigger: true, watchPattern: entry.pattern });
+    sendMessage(contextMsg, { isWatchTrigger: true, watchPattern: entry.pattern, skipUserBubble: true });
   }, [isLoading, sendMessage]);
 
   // Watch queue processor - runs when loading state changes
@@ -291,8 +342,12 @@ ${callStackStr}
 
 User prompt: ${bp.prompt}`;
 
-    // Send message to agent
-    sendMessage(contextMsg, { isWatchTrigger: false, watchPattern: undefined });
+    // Send message to agent (no user bubble for auto-triggers)
+    sendMessage(contextMsg, {
+      isBreakpointPrompt: true,
+      breakpointInfo: { file: bp.file, line: bp.line },
+      skipUserBubble: true,
+    });
 
     // Clear the processed prompt from backend
     const timestamps = debuggerStatus.triggeredPrompts.map(p => p.timestamp);
@@ -302,6 +357,57 @@ User prompt: ${bp.prompt}`;
       body: JSON.stringify({ timestamps }),
     }).catch(() => { /* ignore errors */ });
   }, [debuggerStatus?.triggeredPrompts, isLoading, sendMessage]);
+
+  // Auto-continue: polls for new output and triggers agent when enabled
+  // Matches old reflexive.js behavior exactly:
+  // - Checkbox just enables mode, doesn't trigger immediately
+  // - 2-second interval polls for new output vs baseline
+  // - In interactive mode, only triggers when waitingForInput is true
+  // - No user bubble - just "agent (auto)" assistant message
+  const lastAutoLogCountRef = useRef<number>(-1);
+  const agentAutoHandlingRef = useRef(false);
+
+  useEffect(() => {
+    if (!autoHandleEnabled) {
+      lastAutoLogCountRef.current = -1; // Reset baseline when disabled
+      return;
+    }
+
+    const interval = setInterval(async () => {
+      if (agentAutoHandlingRef.current || isLoading) return;
+
+      // Initialize baseline on first check after enabling
+      if (lastAutoLogCountRef.current === -1) {
+        lastAutoLogCountRef.current = logs.length;
+        return;
+      }
+
+      // Check for new output
+      const hasNewOutput = logs.length > lastAutoLogCountRef.current;
+      const isWaiting = status?.waitingForInput ?? false;
+      const isInteractive = status?.interactive ?? false;
+
+      if (hasNewOutput) {
+        lastAutoLogCountRef.current = logs.length;
+
+        // In interactive mode, only trigger if waiting for input
+        // In non-interactive mode, trigger on new output
+        if (isWaiting || !isInteractive) {
+          agentAutoHandlingRef.current = true;
+
+          const autoMessage = isWaiting
+            ? 'AUTO_CONTINUE: The CLI is waiting for input. Look at the recent output, understand what it is asking or expecting, and use the send_input tool to respond. Do not ask me - handle it directly.'
+            : 'AUTO_CONTINUE: New output has appeared. Review the recent logs and continue working on the current task. If you see errors, investigate and fix them. If a task completed successfully, report it and proceed with any next steps. Do not ask me - just continue working.';
+
+          // Send as auto-trigger (no user bubble, just agent response)
+          await sendMessage(autoMessage, { isAutoTrigger: true, skipUserBubble: true });
+          agentAutoHandlingRef.current = false;
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [autoHandleEnabled, isLoading, logs.length, status?.waitingForInput, status?.interactive, sendMessage]);
 
   // Watch handlers
   const handleAddWatch = useCallback((message: string) => {
@@ -397,10 +503,12 @@ User prompt: ${bp.prompt}`;
             isRunning={status?.isRunning ?? false}
             showControls={status?.showControls ?? true}
             interactive={status?.interactive ?? false}
+            autoHandleEnabled={autoHandleEnabled}
             onSendMessage={sendMessage}
             onStopResponse={stopResponse}
             onClearMessages={clearMessages}
             onSendCliInput={sendCliInput}
+            onAutoHandleChange={setAutoHandleEnabled}
           />
 
           {/* Resize Handle - Vertical */}

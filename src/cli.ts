@@ -622,6 +622,60 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
   // Store conversation session ID for continuity
   let conversationSessionId: string | null = null;
 
+  // Store chat messages server-side for persistence across UI refreshes
+  interface StoredMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: string;
+    isCliOutput?: boolean;
+    isCliInput?: boolean;
+    isWatchTrigger?: boolean;
+    watchPattern?: string;
+    isBreakpointPrompt?: boolean;
+    breakpointFile?: string;
+    breakpointLine?: number;
+    isAutoTrigger?: boolean;
+  }
+  const chatHistory: StoredMessage[] = [];
+  const MAX_CHAT_HISTORY = 100;
+
+  function addChatMessage(msg: Omit<StoredMessage, 'id' | 'timestamp'>): StoredMessage {
+    const message: StoredMessage = {
+      ...msg,
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      timestamp: new Date().toISOString()
+    };
+    chatHistory.push(message);
+    // Trim old messages
+    while (chatHistory.length > MAX_CHAT_HISTORY) {
+      chatHistory.shift();
+    }
+    return message;
+  }
+
+  // In interactive mode, stream CLI output to chat for persistence
+  // Buffer output and flush after a short delay (debounce rapid output)
+  if (options.interactive) {
+    let outputBuffer = '';
+    let outputTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    processManager.setOutputCallback((text, _source) => {
+      outputBuffer += text;
+      if (outputTimeout) clearTimeout(outputTimeout);
+      outputTimeout = setTimeout(() => {
+        if (outputBuffer.trim()) {
+          addChatMessage({
+            role: 'assistant',
+            content: outputBuffer,
+            isCliOutput: true
+          });
+        }
+        outputBuffer = '';
+      }, 100);
+    });
+  }
+
   const server = createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, DELETE');
@@ -720,12 +774,28 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
       if (pathname === '/chat' && req.method === 'POST') {
         let body = '';
         for await (const chunk of req) body += chunk;
-        const { message } = JSON.parse(body);
+        const {
+          message,
+          isCliInput,
+          skipUserStorage,
+          // Metadata for auto-triggered messages (persists on refresh)
+          isWatchTrigger,
+          watchPattern,
+          isBreakpointPrompt,
+          breakpointFile,
+          breakpointLine,
+          isAutoTrigger,
+        } = JSON.parse(body);
 
         if (!message) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'message required' }));
           return;
+        }
+
+        // Store user message in chat history (skip for auto-triggers)
+        if (!skipUserStorage) {
+          addChatMessage({ role: 'user', content: message, isCliInput });
         }
 
         const state = processManager.getState();
@@ -754,26 +824,69 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
           'Connection': 'keep-alive'
         });
 
+        // Accumulate assistant response
+        let assistantContent = '';
+
         try {
           for await (const chunk of chatStream) {
             // Capture session ID for conversation continuity
             if (chunk.type === 'session' && chunk.sessionId) {
               conversationSessionId = chunk.sessionId;
             }
+            // Accumulate text content
+            if (chunk.type === 'text') {
+              assistantContent += (chunk as { type: 'text'; content: string }).content || '';
+            }
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          }
+          // Store complete assistant response with metadata
+          if (assistantContent) {
+            addChatMessage({
+              role: 'assistant',
+              content: assistantContent,
+              isWatchTrigger,
+              watchPattern,
+              isBreakpointPrompt,
+              breakpointFile,
+              breakpointLine,
+              isAutoTrigger,
+            });
           }
         } catch (e) {
           res.write(`data: ${JSON.stringify({ type: 'error', message: (e as Error).message })}\n\n`);
+          // Store error as assistant message
+          addChatMessage({ role: 'assistant', content: `Error: ${(e as Error).message}` });
         }
         res.end();
         return;
       }
 
-      // Reset conversation (clear session history)
+      // Reset conversation (clear session history and chat messages)
       if (pathname === '/reset-conversation' && req.method === 'POST') {
         conversationSessionId = null;
+        chatHistory.length = 0; // Clear chat history
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: true, message: 'Conversation reset' }));
+        return;
+      }
+
+      // Get chat history
+      if (pathname === '/chat-history' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(chatHistory));
+        return;
+      }
+
+      // Add CLI output to chat (for interactive mode)
+      if (pathname === '/chat-cli-output' && req.method === 'POST') {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const { content, isStderr } = JSON.parse(body);
+        if (content) {
+          addChatMessage({ role: 'assistant', content, isCliOutput: true });
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
         return;
       }
 

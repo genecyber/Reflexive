@@ -270,27 +270,104 @@ interface ChatMessage {
   isBreakpointPrompt?: boolean;
   breakpointInfo?: { file: string; line: number };
   isAutoTrigger?: boolean;
+  isCliOutput?: boolean;  // CLI stdout/stderr streamed to chat
+  isCliInput?: boolean;   // User input sent directly to CLI
 }
 
 // Chat hook for streaming
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const sendMessage = useCallback(async (message: string, options?: { isWatchTrigger?: boolean; watchPattern?: string; isBreakpointPrompt?: boolean; breakpointInfo?: { file: string; line: number }; isAutoTrigger?: boolean }) => {
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      role: 'user' as const,
-      content: message,
-      isWatchTrigger: options?.isWatchTrigger,
-      watchPattern: options?.watchPattern,
-      isBreakpointPrompt: options?.isBreakpointPrompt,
-      breakpointInfo: options?.breakpointInfo,
-      isAutoTrigger: options?.isAutoTrigger,
-    };
+  // Fetch chat history ONCE on mount (like old UI)
+  useEffect(() => {
+    if (historyLoaded) return;
 
-    setMessages(prev => [...prev, userMessage]);
+    fetch(`${API_BASE}/chat-history`)
+      .then(res => res.json())
+      .then((history: Array<{
+        id: string;
+        role: 'user' | 'assistant';
+        content: string;
+        timestamp: string;
+        isCliOutput?: boolean;
+        isCliInput?: boolean;
+        isWatchTrigger?: boolean;
+        watchPattern?: string;
+        isBreakpointPrompt?: boolean;
+        breakpointFile?: string;
+        breakpointLine?: number;
+        isAutoTrigger?: boolean;
+      }>) => {
+        if (history && history.length > 0) {
+          const loaded: ChatMessage[] = history.map(msg => ({
+            id: msg.id,
+            role: msg.role,
+            content: msg.content,
+            isCliOutput: msg.isCliOutput,
+            isCliInput: msg.isCliInput,
+            isWatchTrigger: msg.isWatchTrigger,
+            watchPattern: msg.watchPattern,
+            isBreakpointPrompt: msg.isBreakpointPrompt,
+            breakpointInfo: msg.breakpointFile ? { file: msg.breakpointFile, line: msg.breakpointLine || 0 } : undefined,
+            isAutoTrigger: msg.isAutoTrigger,
+          }));
+          setMessages(loaded);
+        }
+        setHistoryLoaded(true);
+      })
+      .catch(() => {
+        setHistoryLoaded(true);
+      });
+  }, [historyLoaded]);
+
+  // Add CLI output as a chat message (for interactive mode)
+  const addCliOutput = useCallback((content: string, isStderr = false) => {
+    const cliMessage: ChatMessage = {
+      id: `cli-${Date.now()}`,
+      role: 'assistant',
+      content,
+      isCliOutput: true,
+    };
+    setMessages(prev => [...prev, cliMessage]);
+
+    // Also store on server for persistence
+    fetch(`${API_BASE}/chat-cli-output`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, isStderr }),
+    }).catch(() => {});
+  }, []);
+
+  // Add CLI input as a user message (for interactive mode)
+  const addCliInput = useCallback((content: string) => {
+    const cliMessage: ChatMessage = {
+      id: `cli-input-${Date.now()}`,
+      role: 'user',
+      content,
+      isCliInput: true,
+    };
+    setMessages(prev => [...prev, cliMessage]);
+  }, []);
+
+  const sendMessage = useCallback(async (message: string, options?: { isWatchTrigger?: boolean; watchPattern?: string; isBreakpointPrompt?: boolean; breakpointInfo?: { file: string; line: number }; isAutoTrigger?: boolean; isCliInput?: boolean; skipUserBubble?: boolean }) => {
+    // Only add user message if not skipping (auto-continue skips user bubble)
+    if (!options?.skipUserBubble) {
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'user' as const,
+        content: message,
+        isWatchTrigger: options?.isWatchTrigger,
+        watchPattern: options?.watchPattern,
+        isBreakpointPrompt: options?.isBreakpointPrompt,
+        breakpointInfo: options?.breakpointInfo,
+        isAutoTrigger: options?.isAutoTrigger,
+      };
+      setMessages(prev => [...prev, userMessage]);
+    }
+
     setIsLoading(true);
 
     const assistantMessage: ChatMessage = {
@@ -311,7 +388,17 @@ export function useChat() {
       const res = await fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({
+          message,
+          skipUserStorage: options?.skipUserBubble,
+          // Pass metadata for persistence on refresh
+          isWatchTrigger: options?.isWatchTrigger,
+          watchPattern: options?.watchPattern,
+          isBreakpointPrompt: options?.isBreakpointPrompt,
+          breakpointFile: options?.breakpointInfo?.file,
+          breakpointLine: options?.breakpointInfo?.line,
+          isAutoTrigger: options?.isAutoTrigger,
+        }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -392,8 +479,14 @@ export function useChat() {
     setIsLoading(false);
   }, []);
 
-  const clearMessages = useCallback(() => {
+  const clearMessages = useCallback(async () => {
     setMessages([]);
+    // Also reset on server
+    try {
+      await fetch(`${API_BASE}/reset-conversation`, { method: 'POST' });
+    } catch {
+      // Ignore
+    }
   }, []);
 
   return {
@@ -402,5 +495,7 @@ export function useChat() {
     sendMessage,
     stopResponse,
     clearMessages,
+    addCliOutput,
+    addCliInput,
   };
 }

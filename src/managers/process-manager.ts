@@ -133,6 +133,9 @@ export class ProcessManager {
   // State from child makeReflexive() instances (parent-child coordination)
   private clientState: Record<string, unknown> = {};
 
+  // Callback for CLI output in interactive mode (for chat integration)
+  private outputCallback: ((text: string, source: 'stdout' | 'stderr') => void) | null = null;
+
   constructor(options: ProcessManagerOptions) {
     this.options = options;
     this.entry = options.entry ? resolve(options.entry) : null;
@@ -140,6 +143,13 @@ export class ProcessManager {
     this.interactive = options.interactive || false;
     this.inject = options.inject || false;
     this.debug = options.debug || false;
+  }
+
+  /**
+   * Set callback for CLI output (for chat integration in interactive mode)
+   */
+  setOutputCallback(callback: (text: string, source: 'stdout' | 'stderr') => void): void {
+    this.outputCallback = callback;
   }
 
   /**
@@ -374,6 +384,8 @@ export class ProcessManager {
 
       if (this.interactive) {
         this._handleInteractiveOutput(text, 'stdout');
+        // Notify callback for chat integration
+        this.outputCallback?.(text, 'stdout');
       }
     });
 
@@ -389,6 +401,8 @@ export class ProcessManager {
 
       if (this.interactive) {
         this._handleInteractiveOutput(text, 'stderr');
+        // Notify callback for chat integration
+        this.outputCallback?.(text, 'stderr');
       }
     });
 
