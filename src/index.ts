@@ -126,7 +126,6 @@ export type {
 
 export type {
   ToolResult,
-  ToolResultContent,
   McpTool,
   McpServerConfig,
   ChatStreamEvent,

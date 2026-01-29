@@ -27,7 +27,7 @@ import { parseJsonBody } from './core/http-server.js';
 import { getRuntimeForFile } from './runtimes/index.js';
 import { z } from 'zod';
 import type { Capabilities } from './types/index.js';
-import type { AnyToolDefinition } from './mcp/tools.js';
+import { createTool, textResult, type AnyToolDefinition } from './mcp/tools.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -103,6 +103,255 @@ function convertZodFieldToJsonSchema(field: z.ZodTypeAny): Record<string, unknow
   }
 
   return result;
+}
+
+// ============================================================================
+// External MCP Server Configuration Loading
+// ============================================================================
+
+import { homedir } from 'os';
+import type { ExternalMcpServer } from './types/mcp.js';
+
+interface McpConfigFile {
+  mcpServers?: Record<string, ExternalMcpServer>;
+}
+
+// Claude Code plugin MCP config format (slightly different - no mcpServers wrapper)
+type ClaudePluginMcpConfig = Record<string, ExternalMcpServer>;
+
+/**
+ * Load MCP servers from Claude Code's plugin directories
+ */
+function loadClaudeCodeMcpServers(): Record<string, ExternalMcpServer> {
+  const servers: Record<string, ExternalMcpServer> = {};
+  const home = homedir();
+  const claudeDir = join(home, '.claude');
+
+  if (!existsSync(claudeDir)) {
+    return servers;
+  }
+
+  // Scan external_plugins directories for .mcp.json files
+  const pluginDirs = [
+    join(claudeDir, 'plugins', 'marketplaces', 'claude-plugins-official', 'external_plugins'),
+  ];
+
+  for (const pluginDir of pluginDirs) {
+    if (!existsSync(pluginDir)) continue;
+
+    try {
+      const plugins = readdirSync(pluginDir);
+      for (const plugin of plugins) {
+        const mcpPath = join(pluginDir, plugin, '.mcp.json');
+        if (existsSync(mcpPath)) {
+          try {
+            const config = JSON.parse(readFileSync(mcpPath, 'utf-8')) as ClaudePluginMcpConfig;
+            // Claude plugin format: { "servername": { ... } } without mcpServers wrapper
+            for (const [name, serverConfig] of Object.entries(config)) {
+              // Only include stdio-based servers (command/args)
+              // Skip HTTP/SSE servers that may require authentication tokens
+              if (serverConfig && typeof serverConfig === 'object' && 'command' in serverConfig) {
+                servers[name] = serverConfig;
+              }
+            }
+          } catch {
+            // Skip invalid configs
+          }
+        }
+      }
+    } catch {
+      // Skip if directory can't be read
+    }
+  }
+
+  return servers;
+}
+
+interface McpServerLoadResult {
+  connected: Record<string, ExternalMcpServer>;
+  discovered: Record<string, ExternalMcpServer>;
+}
+
+/**
+ * Load external MCP server configuration from a file or auto-discover .mcp.json
+ * Also discovers (but doesn't connect to) MCP servers from Claude Code's global config
+ */
+function loadExternalMcpServers(configPath: string | null, cwd: string): McpServerLoadResult {
+  const connected: Record<string, ExternalMcpServer> = {};
+  const discovered: Record<string, ExternalMcpServer> = {};
+
+  // Try explicit config path first
+  if (configPath) {
+    const fullPath = resolve(cwd, configPath);
+    if (existsSync(fullPath)) {
+      try {
+        const config = JSON.parse(readFileSync(fullPath, 'utf-8')) as McpConfigFile;
+        if (config.mcpServers) {
+          Object.assign(connected, config.mcpServers);
+          console.error(`[reflexive] Loaded MCP servers from ${fullPath}:`, Object.keys(config.mcpServers).join(', '));
+        }
+      } catch (e) {
+        console.error(`[reflexive] Failed to load MCP config from ${fullPath}:`, (e as Error).message);
+      }
+    } else {
+      console.error(`[reflexive] MCP config file not found: ${fullPath}`);
+    }
+    return { connected, discovered };
+  }
+
+  // Discover Claude Code MCP servers (not auto-connected, but available)
+  const claudeServers = loadClaudeCodeMcpServers();
+  if (Object.keys(claudeServers).length > 0) {
+    Object.assign(discovered, claudeServers);
+    console.error(`[reflexive] Discovered ${Object.keys(claudeServers).length} available MCP servers (use list_available_mcp_servers tool)`);
+  }
+
+  // Auto-discover .mcp.json in working directory - these ARE connected
+  const autoPath = join(cwd, '.mcp.json');
+  if (existsSync(autoPath)) {
+    try {
+      const config = JSON.parse(readFileSync(autoPath, 'utf-8')) as McpConfigFile;
+      if (config.mcpServers) {
+        Object.assign(connected, config.mcpServers);
+        console.error(`[reflexive] Connecting to MCP servers from .mcp.json:`, Object.keys(config.mcpServers).join(', '));
+      }
+    } catch (e) {
+      console.error(`[reflexive] Failed to load .mcp.json:`, (e as Error).message);
+    }
+  }
+
+  // Also check ~/.mcp.json for user-level config - these ARE connected
+  const homeMcpPath = join(homedir(), '.mcp.json');
+  if (existsSync(homeMcpPath)) {
+    try {
+      const config = JSON.parse(readFileSync(homeMcpPath, 'utf-8')) as McpConfigFile;
+      if (config.mcpServers) {
+        Object.assign(connected, config.mcpServers);
+        console.error(`[reflexive] Connecting to MCP servers from ~/.mcp.json:`, Object.keys(config.mcpServers).join(', '));
+      }
+    } catch (e) {
+      console.error(`[reflexive] Failed to load ~/.mcp.json:`, (e as Error).message);
+    }
+  }
+
+  return { connected, discovered };
+}
+
+/**
+ * Get allowed tool patterns including external MCP servers
+ */
+function getExternalMcpAllowedTools(servers: Record<string, ExternalMcpServer>): string[] {
+  // Allow all tools from each external MCP server using wildcard pattern
+  return Object.keys(servers).map(name => `mcp__${name}__*`);
+}
+
+/**
+ * Create tools for managing MCP server discovery and connection
+ *
+ * @param discovered - Servers discovered from Claude Code plugins (read-only reference)
+ * @param connected - Currently connected servers (mutable - adding here enables instantly)
+ * @param allowedTools - Allowed tool patterns (mutable - push new patterns here)
+ * @param cwd - Current working directory for .mcp.json persistence
+ */
+function createMcpDiscoveryTools(
+  discovered: Record<string, ExternalMcpServer>,
+  connected: Record<string, ExternalMcpServer>,
+  allowedTools: string[],
+  cwd: string
+) {
+  const tools = [];
+
+  // Tool to list available (discovered but not connected) MCP servers
+  tools.push(createTool(
+    'list_available_mcp_servers',
+    `List MCP servers discovered from Claude Code plugins that are available to connect to.
+
+These servers are installed globally via Claude Code but not yet enabled for this Reflexive session.
+Use enable_mcp_server to connect to one - it will be available immediately for the next message.
+
+Also shows currently connected MCP servers.`,
+    {},
+    async () => {
+      const discoveredList = Object.entries(discovered)
+        .filter(([name]) => !connected[name]) // Only show ones not already connected
+        .map(([name, config]) => ({
+          name,
+          command: config.command,
+          args: config.args,
+          status: 'available (not connected)'
+        }));
+
+      const connectedList = Object.entries(connected).map(([name, config]) => ({
+        name,
+        command: config.command,
+        args: config.args,
+        status: 'connected'
+      }));
+
+      return textResult(JSON.stringify({
+        discovered: discoveredList,
+        connected: connectedList,
+        instructions: 'Use enable_mcp_server with a server name to connect. No restart needed - available on next message.'
+      }, null, 2));
+    }
+  ));
+
+  // Tool to enable a discovered MCP server
+  tools.push(createTool(
+    'enable_mcp_server',
+    `Enable a discovered MCP server by connecting to it.
+
+The server will be available immediately for the next chat message - no restart required.
+Also persists the config to .mcp.json so it stays enabled across restarts.`,
+    {
+      server_name: z.string().describe('Name of the MCP server to enable (from list_available_mcp_servers)'),
+    },
+    async ({ server_name }) => {
+      // Check if server exists in discovered
+      if (!discovered[server_name]) {
+        const available = Object.keys(discovered).join(', ');
+        return textResult(`Server "${server_name}" not found in discovered servers. Available: ${available || 'none'}`);
+      }
+
+      // Check if already connected
+      if (connected[server_name]) {
+        return textResult(`Server "${server_name}" is already connected.`);
+      }
+
+      const serverConfig = discovered[server_name];
+
+      // Add to connected servers (instant effect - next query will use it)
+      connected[server_name] = serverConfig;
+
+      // Add to allowed tools list
+      allowedTools.push(`mcp__${server_name}__*`);
+
+      // Also persist to .mcp.json for durability across restarts
+      const mcpJsonPath = join(cwd, '.mcp.json');
+      try {
+        let config: McpConfigFile = { mcpServers: {} };
+        if (existsSync(mcpJsonPath)) {
+          config = JSON.parse(readFileSync(mcpJsonPath, 'utf-8')) as McpConfigFile;
+          if (!config.mcpServers) config.mcpServers = {};
+        }
+        config.mcpServers![server_name] = serverConfig;
+        writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2));
+      } catch {
+        // Non-fatal - server is still enabled for this session
+      }
+
+      return textResult(`Enabled MCP server "${server_name}".
+
+Server config:
+  command: ${serverConfig.command}
+  args: ${JSON.stringify(serverConfig.args)}
+
+The server is now connected and available. You can use its tools in your next message.
+(Also saved to .mcp.json for persistence across restarts.)`);
+    }
+  ));
+
+  return tools;
 }
 
 // ============================================================================
@@ -194,6 +443,7 @@ interface CliOptions {
   sandbox: boolean;
   mcp: boolean;      // Run as stdio MCP server for external agents
   mcpWebUI: boolean; // Enable webUI when in MCP mode (default: true)
+  mcpConfig: string | null; // Path to .mcp.json for external MCP servers
   demo: string | null; // Demo name to run (basic, queue, inject)
   capabilities: Capabilities;
   nodeArgs: string[];
@@ -223,6 +473,7 @@ function parseArgs(args: string[]): CliOptions {
     sandbox: false,
     mcp: false,
     mcpWebUI: true,  // webUI on by default even in MCP mode
+    mcpConfig: null, // Path to external MCP server config
     demo: null,
     capabilities: {
       readFiles: true,
@@ -268,6 +519,8 @@ function parseArgs(args: string[]): CliOptions {
       options.sandbox = true;
     } else if (arg === '--mcp') {
       options.mcp = true;
+    } else if (arg === '--mcp-config') {
+      options.mcpConfig = args[++i];
     } else if (arg === '--no-webui') {
       options.mcpWebUI = false;
     } else if (arg === '--capabilities' || arg === '-c') {
@@ -356,6 +609,7 @@ OPTIONS:
   -i, --interactive       Interactive mode: proxy stdin/stdout through agent
   -s, --sandbox           Run in Vercel Sandbox (isolated environment)
       --mcp               Run as stdio MCP server (for external AI agents like Claude Code)
+      --mcp-config <path> Load external MCP servers from config file (or auto-load .mcp.json)
       --no-webui          Disable web dashboard (only applies to --mcp mode)
       --demo <name>       Run a built-in demo (basic, queue, inject, eval)
       --eval              Enable runtime code evaluation (includes deep instrumentation)
@@ -402,6 +656,28 @@ MCP SERVER MODE:
   Use --debug to enable breakpoint tools (set_breakpoint, resume, step_*, etc.)
   Use the run_app tool to dynamically start or switch between different apps.
   WebUI is still available at http://localhost:3099 unless --no-webui is specified.
+
+EXTERNAL MCP SERVERS:
+  Connect Reflexive's agent to external MCP servers (like filesystem, databases, etc.):
+
+    # Create .mcp.json in your project (auto-loaded):
+    {
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+        },
+        "github": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-github"]
+        }
+      }
+    }
+
+    # Or specify config file explicitly:
+    reflexive --mcp-config ./my-mcp-config.json ./app.js
+
+  The Reflexive agent will be able to use tools from these external MCP servers.
 
 DEMOS:
   Run built-in demos to explore Reflexive features:
@@ -597,7 +873,11 @@ function getAllowedTools(capabilities: Capabilities): string[] {
 }
 
 async function startCliDashboard(processManager: ProcessManager, options: CliOptions): Promise<{ server: ReturnType<typeof createServer>; port: number }> {
-  // Create MCP server with CLI tools + knowledge tools
+  // Load external MCP servers from config (use process.cwd() - where user ran reflexive)
+  const { connected: externalMcpServers, discovered: discoveredMcpServers } = loadExternalMcpServers(options.mcpConfig, process.cwd());
+  const externalMcpAllowedTools = getExternalMcpAllowedTools(externalMcpServers);
+
+  // Create MCP server with CLI tools + knowledge tools + discovery tools
   const cliTools = createCliTools({
     processManager,
     capabilities: options.capabilities,
@@ -606,7 +886,8 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
     debug: options.debug
   });
   const knowledgeTools = createKnowledgeTools();
-  const allTools = [...cliTools, ...knowledgeTools];
+  const mcpDiscoveryTools = createMcpDiscoveryTools(discoveredMcpServers, externalMcpServers, externalMcpAllowedTools, process.cwd());
+  const allTools = [...cliTools, ...knowledgeTools, ...mcpDiscoveryTools];
 
   // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
   const sdkTools = allTools.map(tool => ({
@@ -616,7 +897,8 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
 
   const mcpServer = createSdkMcpServer({
     name: 'reflexive-cli',
-    tools: sdkTools
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools: sdkTools as any
   });
 
   // Store conversation session ID for continuity
@@ -810,10 +1092,11 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
           systemPrompt: buildSystemPrompt(processManager, options),
           mcpServer,
           mcpServerName: 'reflexive-cli',
+          externalMcpServers,
           sessionId: conversationSessionId || undefined,
           queryOptions: {
             cwd: state.cwd,
-            allowedTools: getAllowedTools(options.capabilities)
+            allowedTools: [...getAllowedTools(options.capabilities), ...externalMcpAllowedTools]
           }
         });
 
@@ -1377,13 +1660,18 @@ async function startCliDashboard(processManager: ProcessManager, options: CliOpt
 }
 
 async function startSandboxDashboard(sandboxManager: SandboxManager, options: CliOptions): Promise<{ server: ReturnType<typeof createServer>; port: number }> {
-  // Create MCP server with sandbox tools + knowledge tools
+  // Load external MCP servers from config
+  const { connected: externalMcpServers, discovered: discoveredMcpServers } = loadExternalMcpServers(options.mcpConfig, process.cwd());
+  const externalMcpAllowedTools = getExternalMcpAllowedTools(externalMcpServers);
+
+  // Create MCP server with sandbox tools + knowledge tools + discovery tools
   const sandboxTools = createSandboxTools({
     sandboxManager,
     capabilities: options.capabilities
   });
   const knowledgeTools = createKnowledgeTools();
-  const allTools = [...sandboxTools, ...knowledgeTools];
+  const mcpDiscoveryTools = createMcpDiscoveryTools(discoveredMcpServers, externalMcpServers, externalMcpAllowedTools, process.cwd());
+  const allTools = [...sandboxTools, ...knowledgeTools, ...mcpDiscoveryTools];
 
   // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
   const sdkTools = allTools.map(tool => ({
@@ -1529,10 +1817,11 @@ async function startSandboxDashboard(sandboxManager: SandboxManager, options: Cl
           systemPrompt: buildSandboxSystemPrompt(sandboxManager, options),
           mcpServer,
           mcpServerName: 'reflexive-sandbox',
+          externalMcpServers,
           sessionId: conversationSessionId || undefined,
           queryOptions: {
             cwd: process.cwd(),
-            allowedTools: getSandboxAllowedTools(options.capabilities)
+            allowedTools: [...getSandboxAllowedTools(options.capabilities), ...externalMcpAllowedTools]
           }
         });
 
@@ -1948,7 +2237,9 @@ function createShellTool(capabilities: Capabilities): AnyToolDefinition[] {
 function createChatTool(
   processManager: ProcessManager,
   options: CliOptions,
-  mcpServer: unknown
+  mcpServer: unknown,
+  externalMcpServers: Record<string, ExternalMcpServer>,
+  externalMcpAllowedTools: string[]
 ): AnyToolDefinition {
   return {
     name: 'chat',
@@ -1968,9 +2259,10 @@ function createChatTool(
           systemPrompt: buildSystemPrompt(processManager, options),
           mcpServer,
           mcpServerName: 'reflexive-cli',
+          externalMcpServers,
           queryOptions: {
             cwd: state.cwd,
-            allowedTools: getAllowedTools(options.capabilities)
+            allowedTools: [...getAllowedTools(options.capabilities), ...externalMcpAllowedTools]
           }
         });
 
@@ -2035,7 +2327,11 @@ async function runMcpMode(options: CliOptions): Promise<void> {
     }
   });
 
-  // Create MCP tools (CLI tools + file tools + shell tools + knowledge tools)
+  // Load external MCP servers from config (for MCP server mode)
+  const { connected: externalMcpServers, discovered: discoveredMcpServers } = loadExternalMcpServers(options.mcpConfig, process.cwd());
+  const externalMcpAllowedTools = getExternalMcpAllowedTools(externalMcpServers);
+
+  // Create MCP tools (CLI tools + file tools + shell tools + knowledge tools + discovery tools)
   const cliTools = createCliTools({
     processManager,
     capabilities: options.capabilities,
@@ -2046,10 +2342,11 @@ async function runMcpMode(options: CliOptions): Promise<void> {
   const knowledgeTools = createKnowledgeTools();
   const fileTools = createFileTools(options.capabilities);
   const shellTools = createShellTool(options.capabilities);
+  const mcpDiscoveryTools = createMcpDiscoveryTools(discoveredMcpServers, externalMcpServers, externalMcpAllowedTools, process.cwd());
 
   // Create SDK MCP server for the embedded agent (used by chat tool)
   // Extract raw Zod shapes for the SDK (it expects raw shapes, not ZodObject wrappers)
-  const embeddedTools = [...cliTools, ...knowledgeTools].map(tool => ({
+  const embeddedTools = [...cliTools, ...knowledgeTools, ...mcpDiscoveryTools].map(tool => ({
     ...tool,
     inputSchema: tool.inputSchema instanceof z.ZodObject ? tool.inputSchema.shape : {}
   }));
@@ -2059,13 +2356,13 @@ async function runMcpMode(options: CliOptions): Promise<void> {
   });
 
   // Chat tool allows external agents to talk to the embedded Reflexive agent
-  const chatTool = createChatTool(processManager, options, embeddedMcpServer);
+  const chatTool = createChatTool(processManager, options, embeddedMcpServer, externalMcpServers, externalMcpAllowedTools);
 
   // Run app tool allows dynamically switching apps
   const runAppTool = createRunAppTool(processManager);
 
   // All tools exposed to external MCP clients
-  const allTools = [...cliTools, ...knowledgeTools, ...fileTools, ...shellTools, chatTool, runAppTool];
+  const allTools = [...cliTools, ...knowledgeTools, ...fileTools, ...shellTools, ...mcpDiscoveryTools, chatTool, runAppTool];
 
   // Optionally start webUI
   let dashboardPort: number | null = null;

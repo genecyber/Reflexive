@@ -31,6 +31,9 @@ coverage/
 # Misc
 *.tmp
 *.temp
+
+# Local MCP config (user-specific)
+.mcp.json
 # Private launch docs
 */HN-LAUNCH-PLAN.md
 */HN-LAUNCH-PLAN-V2.md

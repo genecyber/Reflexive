@@ -49,11 +49,17 @@ ${contextSummary}
 
 ${message}`;
 
+  // Merge reflexive's built-in MCP server with any external MCP servers
+  const mcpServers: Record<string, unknown> = {
+    [mcpServerName]: mcpServer,
+    ...(options.externalMcpServers || {})
+  };
+
   const fullOptions = {
     model: 'sonnet',
     permissionMode: 'bypassPermissions',
     maxTurns: 50,
-    mcpServers: { [mcpServerName]: mcpServer },
+    mcpServers,
     systemPrompt,
     includePartialMessages: true,
     ...queryOptions

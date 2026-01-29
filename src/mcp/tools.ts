@@ -7,7 +7,11 @@
 
 import { z } from 'zod';
 import type { AppState } from '../core/app-state.js';
-import type { ToolResult } from '../types/mcp.js';
+// Import CallToolResult directly from MCP SDK for type compatibility
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
+// Use MCP SDK's CallToolResult as our ToolResult for type compatibility
+export type ToolResult = CallToolResult;
 
 // Re-export zod for tool definitions
 export { z };

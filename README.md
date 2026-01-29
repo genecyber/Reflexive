@@ -1,10 +1,10 @@
-# Reflexive
+# Reflexive - Ai's missing debugger
 
 ![Demo](demo1.gif)
 
 [View full video (mp4)](demo1_clipped_4x.mp4)
 
-Embed Claude inside your running application. It sees logs, reads source, edits files, sets breakpoints, and responds to runtime events.
+Reflexive is like puppeteer but for the cli, it embeds Claude inside your running application. It sees logs, reads source, edits files, sets breakpoints, and responds to runtime events.
 
 **Supports:** Node.js, Python, Go, .NET, Rust
 
@@ -30,7 +30,7 @@ echo "console.log('hello')" > app.js; reflexive --write --inject --open app.js
 
 ## What This Is
 
-Claude Agent SDK (Claude Code as a library) + your running application = an agent that:
+       Claude Agent SDK (Claude Code as a library) + your running application = an agent that:
 
 - **Agent loop** - keeps working until done, tool calls, retries, reasoning
 - **Process lifecycle** - start, stop, restart, watch for file changes
@@ -198,6 +198,56 @@ Add to `~/.claude/claude_desktop_config.json`:
 }
 ```
 
+## External MCP Server Support
+
+Reflexive can discover and connect to external MCP servers, giving the embedded agent access to tools from other MCP servers you have installed (like those from Claude Code plugins).
+
+### Auto-Discovery
+
+At startup, Reflexive discovers MCP servers from:
+- Your project's `.mcp.json`
+- User-level `~/.mcp.json`
+- Claude Code plugin directories
+
+```
+[reflexive] Discovered 5 available MCP servers (use list_available_mcp_servers tool)
+[reflexive] Connecting to MCP servers from .mcp.json: my-server
+```
+
+### Dynamic Enabling
+
+The agent can list and enable discovered servers on-demand - no restart required:
+
+```
+You: "What MCP servers are available?"
+Agent: [list_available_mcp_servers]
+       Connected: my-server
+       Available: context7, firebase, playwright, serena
+
+You: "Enable context7"
+Agent: [enable_mcp_server: server_name="context7"]
+       Enabled! Available on your next message.
+```
+
+Once enabled, the server's tools are immediately available. The config is also saved to `.mcp.json` for persistence across restarts.
+
+### Project MCP Config
+
+Add external MCP servers to your project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "some-mcp-server"]
+    }
+  }
+}
+```
+
+---
+
 ### Available MCP Tools
 
 When running as an MCP server, these tools are available to connected agents:
@@ -219,6 +269,8 @@ When running as an MCP server, these tools are available to connected agents:
 | `exec_shell` | Run shell commands (requires `--shell`) |
 | `chat` | Chat with embedded Reflexive agent |
 | `reflexive_self_knowledge` | Get Reflexive documentation |
+| `list_available_mcp_servers` | List discovered external MCP servers |
+| `enable_mcp_server` | Enable a discovered MCP server (instant, no restart) |
 
 With `--debug`: `debug_set_breakpoint`, `debug_resume`, `debug_step_*`, etc. (all languages)
 With `--eval`: `evaluate_in_app`, `list_app_globals` (Node.js only)

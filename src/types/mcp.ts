@@ -3,24 +3,13 @@
  */
 
 import type { z } from 'zod';
+// Import CallToolResult directly from MCP SDK for type compatibility
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 /**
- * MCP tool result content block
+ * MCP tool result - re-exported from @modelcontextprotocol/sdk for compatibility
  */
-export interface ToolResultContent {
-  type: 'text' | 'image' | 'resource';
-  text?: string;
-  data?: string;
-  mimeType?: string;
-}
-
-/**
- * MCP tool result
- */
-export interface ToolResult {
-  content: ToolResultContent[];
-  isError?: boolean;
-}
+export type ToolResult = CallToolResult;
 
 /**
  * MCP tool definition
@@ -78,6 +67,20 @@ export type ChatStreamEvent =
   | ChatStreamDoneEvent;
 
 /**
+ * External MCP server configuration (for connecting to external tools)
+ * Supports stdio (command-based) and HTTP/SSE transports
+ */
+export interface ExternalMcpServer {
+  // stdio transport
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  // HTTP/SSE transport
+  url?: string;
+  transport?: 'sse' | 'http';
+}
+
+/**
  * Chat options for streaming
  */
 export interface ChatOptions {
@@ -86,6 +89,8 @@ export interface ChatOptions {
   mcpServer: unknown;
   mcpServerName: string;
   sessionId?: string | null;
+  // External MCP servers to include (keyed by server name)
+  externalMcpServers?: Record<string, ExternalMcpServer>;
   queryOptions?: {
     cwd?: string;
     allowedTools?: string[];
