@@ -166,7 +166,8 @@ export default {
     vcpus: 2,
     memory: 2048,
     timeout: '30m',
-    runtime: 'node22'
+    runtime: 'node22',
+    ports: [3000]  // Expose ports for preview URLs (e.g., web servers)
   }
 };
 ```
@@ -556,6 +557,7 @@ interface ReflexiveConfig {
     memory: number;     // MB, 128-8192
     timeout: string;    // e.g., '30m', '1h'
     runtime: 'node22' | 'node20';
+    ports?: number[];   // Ports to expose (e.g., [3000])
   };
   hosted?: {
     maxSandboxes: number;

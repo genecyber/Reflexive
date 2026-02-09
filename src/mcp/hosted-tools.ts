@@ -38,13 +38,15 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
         vcpus: z.number().optional().describe('Number of vCPUs (default: 2)'),
         memory: z.number().optional().describe('Memory in MB (default: 2048)'),
         timeout: z.string().optional().describe('Timeout duration (e.g., "30m")'),
+        ports: z.array(z.number()).optional().describe('Ports to expose (e.g., [3000])'),
       },
-      async ({ id, vcpus, memory, timeout }) => {
+      async ({ id, vcpus, memory, timeout, ports }) => {
         try {
           const instance = await manager.create(id, {
             vcpus,
             memory,
             timeout,
+            ports,
           });
           return jsonResult({
             message: `Sandbox '${id}' created successfully`,
@@ -341,6 +343,32 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       }
     ),
 
+    // Get domain URL for a sandbox port
+    createTool(
+      'sandbox_get_domain',
+      'Get the preview URL for a specific port on a sandbox',
+      {
+        id: z.string().describe('Sandbox ID'),
+        port: z.number().describe('Port number to get domain for (e.g., 3000)'),
+      },
+      async ({ id, port }) => {
+        try {
+          const domain = manager.getDomain(id, port);
+          if (!domain) {
+            return errorResult(`No domain available for sandbox '${id}' on port ${port}`);
+          }
+          return jsonResult({
+            sandboxId: id,
+            port,
+            domain,
+            url: `https://${domain}`,
+          });
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : 'Failed to get domain');
+        }
+      }
+    ),
+
     // Upload files to sandbox
     createTool(
       'sandbox_upload_files',
@@ -389,6 +417,7 @@ export function getHostedToolNames(): string[] {
     'sandbox_read_file',
     'sandbox_write_file',
     'sandbox_list_files',
+    'sandbox_get_domain',
     'sandbox_upload_files',
   ];
 }

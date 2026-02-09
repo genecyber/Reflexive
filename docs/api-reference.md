@@ -674,6 +674,7 @@ interface SandboxManagerOptions {
   memory?: number;       // MB, 128-8192 (default: 2048)
   timeout?: number;      // ms (default: 30 minutes)
   runtime?: 'node22' | 'node20';  // (default: 'node22')
+  ports?: number[];      // Ports to expose (e.g., [3000] for web servers)
   appState?: AppState;
 }
 ```
@@ -748,6 +749,30 @@ Write file to sandbox.
 
 ```typescript
 await sm.writeFile('/app/data.txt', 'Hello World');
+```
+
+##### getDomain()
+```typescript
+getDomain(port: number): string | null
+```
+
+Get the public URL for an exposed port on the sandbox. Returns `null` if the sandbox is not running or the port is not exposed.
+
+```typescript
+const url = sm.getDomain(3000);
+console.log(url); // "https://abc123.vercel.app"
+```
+
+##### getSandboxId()
+```typescript
+getSandboxId(): string | null
+```
+
+Get the underlying sandbox ID. Returns `null` if no sandbox is created.
+
+```typescript
+const id = sm.getSandboxId();
+console.log(id); // "sbx-abc123"
 ```
 
 ##### runCommand()
@@ -877,6 +902,18 @@ if (sandbox) {
 }
 ```
 
+##### getDomain()
+```typescript
+getDomain(id: string, port: number): string | null
+```
+
+Get the public URL for an exposed port on a specific sandbox.
+
+```typescript
+const previewUrl = manager.getDomain('my-app', 3000);
+console.log(previewUrl); // "https://abc123.vercel.app"
+```
+
 ## REST API
 
 The REST API is available in hosted mode.
@@ -935,7 +972,8 @@ Create a new sandbox.
     "vcpus": 2,
     "memory": 2048,
     "timeout": "30m",
-    "runtime": "node22"
+    "runtime": "node22",
+    "ports": [3000]
   }
 }
 ```
@@ -1019,6 +1057,28 @@ Stop a sandbox.
 {
   "status": "stopped"
 }
+```
+
+#### GET /api/sandboxes/:id/domain/:port
+
+Get the public URL for an exposed port on a sandbox. Useful for getting live preview URLs for web servers running inside the sandbox.
+
+**Parameters**:
+- `:id` - Sandbox ID
+- `:port` - Port number (e.g., `3000`)
+
+**Response**:
+```json
+{
+  "domain": "https://abc123.vercel.app",
+  "port": 3000
+}
+```
+
+**Example**:
+```bash
+curl https://your-reflexive.app/api/sandboxes/my-app/domain/3000 \
+  -H "Authorization: Bearer sk-xxx"
 ```
 
 #### DELETE /api/sandboxes/:id
@@ -1403,6 +1463,36 @@ Get debugger connection status.
 
 Available in sandbox and hosted modes.
 
+#### create_sandbox
+Create a new sandbox (hosted mode).
+
+**Parameters**:
+- `id` (string, optional): Sandbox ID (auto-generated if omitted)
+- `vcpus` (number, optional): CPU count (1-4, default: 2)
+- `memory` (number, optional): Memory in MB (128-8192, default: 2048)
+- `timeout` (string, optional): Timeout duration (default: '30m')
+- `ports` (number[], optional): Ports to expose (e.g., `[3000]` for web servers)
+
+**Example**:
+```
+[create_sandbox: id="my-app", ports=[3000]]
+```
+
+#### sandbox_get_domain
+Get the public preview URL for a specific port on a sandbox.
+
+**Parameters**:
+- `id` (string, required): Sandbox ID
+- `port` (number, required): Port number (e.g., 3000)
+
+**Returns**: The public URL for the exposed port.
+
+**Example**:
+```
+[sandbox_get_domain: id="my-app", port=3000]
+→ "https://abc123.vercel.app"
+```
+
 #### get_sandbox_state
 Get sandbox status.
 
@@ -1604,6 +1694,7 @@ export interface MultiSandboxManagerInterface {
   resume(snapshotId: string): Promise<{ id: string }>;
   list(): SandboxInstance[];
   get(id: string): SandboxInstance | undefined;
+  getDomain(id: string, port: number): string | null;
   getLogs(id: string, count?: number): LogEntry[];
   getCustomState(id: string, key?: string): unknown;
 }

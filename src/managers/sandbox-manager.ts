@@ -34,6 +34,7 @@ export interface SandboxManagerOptions {
   memory?: number;
   timeout?: string | number;
   runtime?: 'node22' | 'node20';
+  ports?: number[];
 }
 
 export interface SandboxState {
@@ -97,6 +98,7 @@ export class SandboxManager {
       memory: options.memory || 2048,
       timeout: options.timeout || '30m',
       runtime: options.runtime || 'node22',
+      ports: options.ports,
     };
   }
 
@@ -163,11 +165,15 @@ export class SandboxManager {
 
     await this.loadSandboxModule();
 
-    const createOptions = {
+    const createOptions: Record<string, unknown> = {
       vcpus: this.options.vcpus,
       memory: this.options.memory,
       timeout: this.options.timeout,
     };
+
+    if (this.options.ports && this.options.ports.length > 0) {
+      createOptions.ports = this.options.ports;
+    }
 
     this.sandbox = await this.sandboxModule!.Sandbox.create(createOptions);
     this._isCreated = true;
@@ -731,5 +737,25 @@ module.exports = process.reflexive;
   setSandbox(sandbox: VercelSandbox): void {
     this.sandbox = sandbox;
     this._isCreated = true;
+  }
+
+  /**
+   * Get the sandbox ID
+   */
+  getSandboxId(): string | null {
+    return this.sandbox?.sandboxId ?? null;
+  }
+
+  /**
+   * Get the domain URL for a specific port
+   */
+  getDomain(port: number): string | null {
+    if (!this.sandbox) return null;
+    // The Vercel Sandbox API provides domain() for exposed ports
+    const sb = this.sandbox as unknown as { domain?: (port: number) => string };
+    if (typeof sb.domain === 'function') {
+      return sb.domain(port);
+    }
+    return null;
   }
 }

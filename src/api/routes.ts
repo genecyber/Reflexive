@@ -286,6 +286,38 @@ export function createApiRoutes(config: ApiRoutesConfig): Route[] {
       }),
     },
 
+    // Get domain for a port
+    {
+      method: 'GET',
+      path: new RegExp(`^${basePath}/sandboxes/[^/]+/domain/\\d+$`),
+      handler: wrapHandler(async (req, res, pathname) => {
+        const id = extractSandboxId(pathname, basePath);
+        if (!id) {
+          sendError(res, 'Invalid sandbox ID', 400);
+          return;
+        }
+
+        // Extract port from URL: /api/sandboxes/:id/domain/:port
+        const portMatch = pathname.match(/\/domain\/(\d+)$/);
+        if (!portMatch) {
+          sendError(res, 'Invalid port', 400);
+          return;
+        }
+        const port = parseInt(portMatch[1], 10);
+
+        try {
+          const domain = manager.getDomain(id, port);
+          if (!domain) {
+            sendError(res, `No domain available for port ${port}`, 404);
+            return;
+          }
+          sendJson(res, { domain, url: `https://${domain}` });
+        } catch (error) {
+          sendError(res, error instanceof Error ? error.message : 'Failed to get domain', 400);
+        }
+      }),
+    },
+
     // Create snapshot
     {
       method: 'POST',

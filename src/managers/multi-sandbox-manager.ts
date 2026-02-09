@@ -107,6 +107,7 @@ export class MultiSandboxManager implements MultiSandboxManagerInterface {
       memory: fullConfig.memory,
       timeout: fullConfig.timeout,
       runtime: fullConfig.runtime,
+      ports: fullConfig.ports,
     });
 
     // Create the underlying sandbox
@@ -353,6 +354,14 @@ export class MultiSandboxManager implements MultiSandboxManagerInterface {
   async runCommand(id: string, cmd: string, args: string[] = []): Promise<CommandResult> {
     const entry = this.getEntry(id);
     return entry.manager.runCommand(cmd, args);
+  }
+
+  /**
+   * Get the domain URL for a specific port on a sandbox
+   */
+  getDomain(id: string, port: number): string | null {
+    const entry = this.getEntry(id);
+    return entry.manager.getDomain(port);
   }
 
   /**

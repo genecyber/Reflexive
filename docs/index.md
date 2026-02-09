@@ -124,7 +124,7 @@ Practical examples for all operating modes, including library mode integration, 
 
 ## Version Information
 
-**Current Version**: 1.0.13
+**Current Version**: 1.1.0
 
 **Requirements**:
 - Node.js >= 18.0.0 (for running Reflexive CLI)

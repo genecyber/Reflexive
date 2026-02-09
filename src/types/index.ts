@@ -73,6 +73,7 @@ export interface SandboxConfig {
   memory: number;
   timeout: string | number;
   runtime: 'node22' | 'node20';
+  ports?: number[];
 }
 
 export interface HostedConfig {
