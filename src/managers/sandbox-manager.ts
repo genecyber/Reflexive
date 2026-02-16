@@ -165,11 +165,32 @@ export class SandboxManager {
 
     await this.loadSandboxModule();
 
-    const createOptions: Record<string, unknown> = {
-      vcpus: this.options.vcpus,
-      memory: this.options.memory,
-      timeout: this.options.timeout,
-    };
+    // Convert timeout to milliseconds if it's a string (e.g. '5m', '30s')
+    let timeoutMs: number | undefined;
+    if (typeof this.options.timeout === 'string') {
+      const match = this.options.timeout.match(/^(\d+)(s|m|h)?$/);
+      if (match) {
+        const value = parseInt(match[1]!, 10);
+        const unit = match[2] || 's';
+        timeoutMs = unit === 'h' ? value * 3600000 : unit === 'm' ? value * 60000 : value * 1000;
+      }
+    } else if (typeof this.options.timeout === 'number') {
+      timeoutMs = this.options.timeout;
+    }
+
+    const createOptions: Record<string, unknown> = {};
+
+    if (timeoutMs) {
+      createOptions.timeout = timeoutMs;
+    }
+
+    if (this.options.vcpus) {
+      createOptions.resources = { vcpus: this.options.vcpus };
+    }
+
+    if (this.options.runtime) {
+      createOptions.runtime = this.options.runtime;
+    }
 
     if (this.options.ports && this.options.ports.length > 0) {
       createOptions.ports = this.options.ports;
@@ -177,6 +198,16 @@ export class SandboxManager {
 
     this.sandbox = await this.sandboxModule!.Sandbox.create(createOptions);
     this._isCreated = true;
+
+    // Ensure /app directory exists with write permissions for the sandbox user.
+    // Vercel sandboxes run as non-root — /app doesn't exist by default.
+    try {
+      await this.sandbox.runCommand({ cmd: 'sudo', args: ['mkdir', '-p', '/app'] });
+      await this.sandbox.runCommand({ cmd: 'sudo', args: ['chmod', '777', '/app'] });
+    } catch {
+      // Non-fatal: some sandbox configs may not have sudo
+    }
+
     this._log('system', `Sandbox created: ${this.sandbox.sandboxId}`);
     this.emit('created', { sandboxId: this.sandbox.sandboxId });
   }

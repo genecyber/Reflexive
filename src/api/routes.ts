@@ -311,7 +311,8 @@ export function createApiRoutes(config: ApiRoutesConfig): Route[] {
             sendError(res, `No domain available for port ${port}`, 404);
             return;
           }
-          sendJson(res, { domain, url: `https://${domain}` });
+          const url = domain.startsWith('https://') || domain.startsWith('http://') ? domain : `https://${domain}`;
+          sendJson(res, { domain, url });
         } catch (error) {
           sendError(res, error instanceof Error ? error.message : 'Failed to get domain', 400);
         }

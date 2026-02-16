@@ -34,22 +34,22 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'create_sandbox',
       'Create a new sandbox instance',
       {
-        id: z.string().describe('Unique identifier for the sandbox'),
+        sandbox_id: z.string().describe('Unique identifier for the sandbox'),
         vcpus: z.number().optional().describe('Number of vCPUs (default: 2)'),
         memory: z.number().optional().describe('Memory in MB (default: 2048)'),
         timeout: z.string().optional().describe('Timeout duration (e.g., "30m")'),
         ports: z.array(z.number()).optional().describe('Ports to expose (e.g., [3000])'),
       },
-      async ({ id, vcpus, memory, timeout, ports }) => {
+      async ({ sandbox_id, vcpus, memory, timeout, ports }) => {
         try {
-          const instance = await manager.create(id, {
+          const instance = await manager.create(sandbox_id, {
             vcpus,
             memory,
             timeout,
             ports,
           });
           return jsonResult({
-            message: `Sandbox '${id}' created successfully`,
+            message: `Sandbox '${sandbox_id}' created successfully`,
             sandbox: instance,
           });
         } catch (error) {
@@ -63,14 +63,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'start_sandbox',
       'Start a sandbox with an entry file',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         entryFile: z.string().describe('Path to entry file (e.g., /app/main.js)'),
         args: z.array(z.string()).optional().describe('Command line arguments'),
       },
-      async ({ id, entryFile, args }) => {
+      async ({ sandbox_id, entryFile, args }) => {
         try {
-          await manager.start(id, entryFile, args);
-          return textResult(`Sandbox '${id}' started with entry file: ${entryFile}`);
+          await manager.start(sandbox_id, entryFile, args);
+          return textResult(`Sandbox '${sandbox_id}' started with entry file: ${entryFile}`);
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : 'Failed to start sandbox');
         }
@@ -82,12 +82,12 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'stop_sandbox',
       'Stop a running sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
       },
-      async ({ id }) => {
+      async ({ sandbox_id }) => {
         try {
-          await manager.stop(id);
-          return textResult(`Sandbox '${id}' stopped`);
+          await manager.stop(sandbox_id);
+          return textResult(`Sandbox '${sandbox_id}' stopped`);
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : 'Failed to stop sandbox');
         }
@@ -99,12 +99,12 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'destroy_sandbox',
       'Destroy a sandbox completely (cannot be undone)',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
       },
-      async ({ id }) => {
+      async ({ sandbox_id }) => {
         try {
-          await manager.destroy(id);
-          return textResult(`Sandbox '${id}' destroyed`);
+          await manager.destroy(sandbox_id);
+          return textResult(`Sandbox '${sandbox_id}' destroyed`);
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : 'Failed to destroy sandbox');
         }
@@ -116,12 +116,12 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'get_sandbox',
       'Get details about a specific sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
       },
-      async ({ id }) => {
-        const sandbox = manager.get(id);
+      async ({ sandbox_id }) => {
+        const sandbox = manager.get(sandbox_id);
         if (!sandbox) {
-          return errorResult(`Sandbox '${id}' not found`);
+          return errorResult(`Sandbox '${sandbox_id}' not found`);
         }
         return jsonResult(sandbox);
       }
@@ -132,14 +132,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'create_snapshot',
       'Create a snapshot of a sandbox for later restoration',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         files: z.array(z.string()).optional().describe('Specific files to include (captures /app by default)'),
       },
-      async ({ id, files }) => {
+      async ({ sandbox_id, files }) => {
         try {
-          const result = await manager.snapshot(id, { files });
+          const result = await manager.snapshot(sandbox_id, { files });
           return jsonResult({
-            message: `Snapshot created for sandbox '${id}'`,
+            message: `Snapshot created for sandbox '${sandbox_id}'`,
             snapshotId: result.snapshotId,
           });
         } catch (error) {
@@ -213,17 +213,17 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_get_logs',
       'Get logs from a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         count: z.number().optional().describe('Number of logs to return (default: 50)'),
         query: z.string().optional().describe('Search query to filter logs'),
       },
-      async ({ id, count = 50, query }) => {
+      async ({ sandbox_id, count = 50, query }) => {
         try {
           const logs = query
-            ? manager.searchLogs(id, query)
-            : manager.getLogs(id, count);
+            ? manager.searchLogs(sandbox_id, query)
+            : manager.getLogs(sandbox_id, count);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             count: logs.length,
             logs,
           });
@@ -238,14 +238,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_get_state',
       'Get custom state from a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         key: z.string().optional().describe('Specific state key to retrieve'),
       },
-      async ({ id, key }) => {
+      async ({ sandbox_id, key }) => {
         try {
-          const state = manager.getCustomState(id, key);
+          const state = manager.getCustomState(sandbox_id, key);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             key: key || 'all',
             state,
           });
@@ -260,15 +260,15 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_run_command',
       'Run a shell command in a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         cmd: z.string().describe('Command to run'),
         args: z.array(z.string()).optional().describe('Command arguments'),
       },
-      async ({ id, cmd, args = [] }) => {
+      async ({ sandbox_id, cmd, args = [] }) => {
         try {
-          const result = await manager.runCommand(id, cmd, args);
+          const result = await manager.runCommand(sandbox_id, cmd, args);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             command: `${cmd} ${args.join(' ')}`.trim(),
             exitCode: result.exitCode,
             stdout: result.stdout,
@@ -285,14 +285,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_read_file',
       'Read a file from a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         path: z.string().describe('File path to read'),
       },
-      async ({ id, path }) => {
+      async ({ sandbox_id, path }) => {
         try {
-          const content = await manager.readFile(id, path);
+          const content = await manager.readFile(sandbox_id, path);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             path,
             content,
           });
@@ -307,14 +307,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_write_file',
       'Write a file to a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         path: z.string().describe('File path to write'),
         content: z.string().describe('File content'),
       },
-      async ({ id, path, content }) => {
+      async ({ sandbox_id, path, content }) => {
         try {
-          await manager.writeFile(id, path, content);
-          return textResult(`File written to sandbox '${id}': ${path}`);
+          await manager.writeFile(sandbox_id, path, content);
+          return textResult(`File written to sandbox '${sandbox_id}': ${path}`);
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : 'Failed to write file');
         }
@@ -326,14 +326,14 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_list_files',
       'List files in a sandbox directory',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         path: z.string().describe('Directory path to list'),
       },
-      async ({ id, path }) => {
+      async ({ sandbox_id, path }) => {
         try {
-          const files = await manager.listFiles(id, path);
+          const files = await manager.listFiles(sandbox_id, path);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             path,
             files,
           });
@@ -348,20 +348,21 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_get_domain',
       'Get the preview URL for a specific port on a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         port: z.number().describe('Port number to get domain for (e.g., 3000)'),
       },
-      async ({ id, port }) => {
+      async ({ sandbox_id, port }) => {
         try {
-          const domain = manager.getDomain(id, port);
+          const domain = manager.getDomain(sandbox_id, port);
           if (!domain) {
-            return errorResult(`No domain available for sandbox '${id}' on port ${port}`);
+            return errorResult(`No domain available for sandbox '${sandbox_id}' on port ${port}`);
           }
+          const url = domain.startsWith('https://') || domain.startsWith('http://') ? domain : `https://${domain}`;
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             port,
             domain,
-            url: `https://${domain}`,
+            url,
           });
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : 'Failed to get domain');
@@ -374,17 +375,17 @@ export function createHostedTools(manager: MultiSandboxManager): AnyToolDefiniti
       'sandbox_upload_files',
       'Upload multiple files to a sandbox',
       {
-        id: z.string().describe('Sandbox ID'),
+        sandbox_id: z.string().describe('Sandbox ID'),
         files: z.array(z.object({
           path: z.string().describe('Destination path'),
           content: z.string().describe('File content'),
         })).describe('Files to upload'),
       },
-      async ({ id, files }) => {
+      async ({ sandbox_id, files }) => {
         try {
-          await manager.uploadFiles(id, files);
+          await manager.uploadFiles(sandbox_id, files);
           return jsonResult({
-            sandboxId: id,
+            sandboxId: sandbox_id,
             uploaded: files.length,
             paths: files.map(f => f.path),
           });

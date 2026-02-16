@@ -1,6 +1,6 @@
 import http from 'http';
 
-const PORT = 8080;
+const START_PORT = 8080;
 let requestCount = 0;
 const visitors = new Map();
 let dbConnected = true;
@@ -71,7 +71,7 @@ const server = http.createServer((req, res) => {
   }
   // ============ Watch Trigger Demo Endpoints ============
   else if (req.url.startsWith('/login')) {
-    const params = new URL(req.url, `http://localhost:${PORT}`).searchParams;
+    const params = new URL(req.url, `http://localhost`).searchParams;
     const user = params.get('user') || 'unknown';
     const pass = params.get('pass') || '';
 
@@ -161,12 +161,13 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`
+function tryListen(port) {
+  server.listen(port, () => {
+    console.log(`
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                         REFLEXIVE DEMO APP                                     ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
-║  Server running at http://localhost:${PORT}                                       ║
+║  Server running at http://localhost:${port}                                       ║
 ║  PID: ${process.pid}                                                              ║
 ╠═══════════════════════════════════════════════════════════════════════════════╣
 ║  HOW TO USE THIS DEMO:                                                         ║
@@ -202,7 +203,20 @@ server.listen(PORT, () => {
 ║    "SECURITY WARNING" → "Potential brute force - suggest mitigations"          ║
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 `);
-});
+  });
+
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${port} is in use, trying ${port + 1}...`);
+      server.close();
+      tryListen(port + 1);
+    } else {
+      throw err;
+    }
+  });
+}
+
+tryListen(START_PORT);
 
 // Log something periodically
 setInterval(() => {
