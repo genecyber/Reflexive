@@ -67,7 +67,7 @@ describe('Hosted Tools', () => {
 
   describe('create_sandbox', () => {
     it('should create a sandbox', async () => {
-      const result = await runTool('create_sandbox', { id: 'new-sandbox' });
+      const result = await runTool('create_sandbox', { sandbox_id: 'new-sandbox' });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.message).toContain("'new-sandbox' created");
@@ -77,7 +77,7 @@ describe('Hosted Tools', () => {
 
     it('should create sandbox with config', async () => {
       const result = await runTool('create_sandbox', {
-        id: 'new-sandbox',
+        sandbox_id: 'new-sandbox',
         vcpus: 4,
         memory: 4096,
       });
@@ -90,7 +90,7 @@ describe('Hosted Tools', () => {
     it('should return error for duplicate id', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('create_sandbox', { id: 'test-1' });
+      const result = await runTool('create_sandbox', { sandbox_id: 'test-1' });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('already exists');
@@ -102,7 +102,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('start_sandbox', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         entryFile: '/app/main.js',
       });
 
@@ -114,7 +114,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('start_sandbox', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         entryFile: '/app/main.js',
         args: ['--port', '3000'],
       });
@@ -124,7 +124,7 @@ describe('Hosted Tools', () => {
 
     it('should return error for non-existent sandbox', async () => {
       const result = await runTool('start_sandbox', {
-        id: 'non-existent',
+        sandbox_id: 'non-existent',
         entryFile: '/app/main.js',
       });
 
@@ -138,7 +138,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
       await manager.start('test-1', '/app/main.js');
 
-      const result = await runTool('stop_sandbox', { id: 'test-1' });
+      const result = await runTool('stop_sandbox', { sandbox_id: 'test-1' });
 
       expect(result.content[0].text).toContain("'test-1' stopped");
       expect(manager.get('test-1')?.status).toBe('stopped');
@@ -149,7 +149,7 @@ describe('Hosted Tools', () => {
     it('should destroy a sandbox', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('destroy_sandbox', { id: 'test-1' });
+      const result = await runTool('destroy_sandbox', { sandbox_id: 'test-1' });
 
       expect(result.content[0].text).toContain("'test-1' destroyed");
       expect(manager.get('test-1')).toBeUndefined();
@@ -160,7 +160,7 @@ describe('Hosted Tools', () => {
     it('should get sandbox details', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('get_sandbox', { id: 'test-1' });
+      const result = await runTool('get_sandbox', { sandbox_id: 'test-1' });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.id).toBe('test-1');
@@ -168,7 +168,7 @@ describe('Hosted Tools', () => {
     });
 
     it('should return error for non-existent sandbox', async () => {
-      const result = await runTool('get_sandbox', { id: 'non-existent' });
+      const result = await runTool('get_sandbox', { sandbox_id: 'non-existent' });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('not found');
@@ -179,7 +179,7 @@ describe('Hosted Tools', () => {
     it('should create a snapshot', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('create_snapshot', { id: 'test-1' });
+      const result = await runTool('create_snapshot', { sandbox_id: 'test-1' });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.message).toContain('Snapshot created');
@@ -190,7 +190,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('create_snapshot', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         files: ['/app/main.js'],
       });
 
@@ -266,7 +266,7 @@ describe('Hosted Tools', () => {
     it('should get logs', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('sandbox_get_logs', { id: 'test-1' });
+      const result = await runTool('sandbox_get_logs', { sandbox_id: 'test-1' });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.sandboxId).toBe('test-1');
@@ -277,7 +277,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('sandbox_get_logs', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         query: 'error',
       });
 
@@ -289,7 +289,7 @@ describe('Hosted Tools', () => {
     it('should get state', async () => {
       await manager.create('test-1');
 
-      const result = await runTool('sandbox_get_state', { id: 'test-1' });
+      const result = await runTool('sandbox_get_state', { sandbox_id: 'test-1' });
 
       const data = JSON.parse(result.content[0].text);
       expect(data.sandboxId).toBe('test-1');
@@ -300,7 +300,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('sandbox_get_state', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         key: 'count',
       });
 
@@ -314,7 +314,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('sandbox_run_command', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         cmd: 'echo',
         args: ['hello'],
       });
@@ -332,7 +332,7 @@ describe('Hosted Tools', () => {
       await manager.writeFile('test-1', '/app/test.js', 'console.log("test")');
 
       const result = await runTool('sandbox_read_file', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         path: '/app/test.js',
       });
 
@@ -348,7 +348,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('sandbox_write_file', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         path: '/app/test.js',
         content: 'console.log("test")',
       });
@@ -364,7 +364,7 @@ describe('Hosted Tools', () => {
       await manager.writeFile('test-1', '/app/test.js', 'test');
 
       const result = await runTool('sandbox_list_files', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         path: '/app',
       });
 
@@ -380,7 +380,7 @@ describe('Hosted Tools', () => {
       await manager.create('test-1');
 
       const result = await runTool('sandbox_upload_files', {
-        id: 'test-1',
+        sandbox_id: 'test-1',
         files: [
           { path: '/app/a.js', content: 'a' },
           { path: '/app/b.js', content: 'b' },
